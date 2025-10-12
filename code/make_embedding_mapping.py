@@ -7,7 +7,7 @@ from pathlib import Path
 # 参数化前缀
 parser = argparse.ArgumentParser(description='生成 embedding_to_image_mapping.json，支持多降维方法')
 parser.add_argument('--prefix', type=str, default='TSNE', help='降维方法前缀，如 TSNE、NeuralTSNE、UMAP')
-parser.add_argument('--no-filter', action='store_true', help='不使用 failed_images 过滤（仅影响正常样本）')
+parser.add_argument('--no-filter', action='store_true', help='不使用 failed_images 过滤（同时影响正常与异常样本）')
 parser.add_argument('--anom-list', type=str, help='指定异常图片清单文件（每行一个文件名或绝对路径），用于精确匹配与排序异常图片')
 args = parser.parse_args()
 prefix = args.prefix
@@ -22,6 +22,11 @@ fail_path = prefix_fail_path if os.path.exists(prefix_fail_path) else default_fa
 
 normal_emb_path = os.path.join(r'D:\Hand-DR-Project\data\features', f'{prefix}_embedding.npy')
 anom_emb_path   = os.path.join(r'D:\Hand-DR-Project\data\features', f'anomalous_{prefix}_embedding.npy')
+
+# 异常样本 failed 过滤清单（优先前缀，其次默认）
+anom_default_fail_path = r'D:\Hand-DR-Project\data\features\anomalous_failed_images.txt'
+anom_prefix_fail_path = os.path.join(r'D:\Hand-DR-Project\data\features', f'anomalous_failed_images_{prefix}.txt')
+anom_fail_path = anom_prefix_fail_path if os.path.exists(anom_prefix_fail_path) else anom_default_fail_path
 
 # 1. 读取 failed_images（可禁用，支持 per-prefix）
 if args.no_filter:
@@ -56,12 +61,12 @@ for i, (img, emb) in enumerate(zip(normal_images, normal_embedding)):
 anom_embedding = np.load(anom_emb_path)
 anom_images = sorted(list(Path(anom_dir).glob("*.jpg")))
 
-# 4.1 异常样本 failed 过滤（如有 features/anomalous_failed_images.txt）
-anom_failed_path = os.path.join(r'D:\Hand-DR-Project\data\features', 'anomalous_failed_images.txt')
-if os.path.exists(anom_failed_path) and not args.anom_list:
-    with open(anom_failed_path, 'r', encoding='utf-8') as f:
-        anom_failed = set(line.strip() for line in f if line.strip())
-    anom_images = [img for img in anom_images if img.name not in anom_failed]
+# 4.1 异常样本 failed 过滤（可禁用、支持 per-prefix；当指定 --anom-list 时跳过）
+if (not args.no_filter) and (not args.anom_list):
+    if os.path.exists(anom_fail_path):
+        with open(anom_fail_path, 'r', encoding='utf-8') as f:
+            anom_failed = set(line.strip() for line in f if line.strip())
+        anom_images = [img for img in anom_images if img.name not in anom_failed]
 
 # 4.2 如果提供异常图片清单，则按清单精确选择与排序
 if args.anom_list:
