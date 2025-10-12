@@ -832,34 +832,19 @@ def main():
     normalized_embedding, labels = load_and_normalize_data()
     boundary_indices = detect_boundary_fixed_params(normalized_embedding)
     anomalous_wasserstein = calculate_wasserstein_metrics(normalized_embedding, labels, boundary_indices)
-    output_path = visualize_results(normalized_embedding, labels, boundary_indices)
-
+    # 只生成交互式 HTML，不生成静态图和 txt
     metrics = {
         'boundary_count': len(boundary_indices),
         'anomalous_wasserstein': anomalous_wasserstein,
     }
     html_path = generate_interactive_html(normalized_embedding, labels, boundary_indices, metrics)
 
-    results = {
-        'boundary_count': len(boundary_indices),
-        'anomalous_wasserstein': anomalous_wasserstein,
-    }
-
-    results_path = os.path.join(RESULTS_DIR, 'TSNE_metrics.txt')
-    with open(results_path, 'w') as f:
-        f.write("固定参数边界分析结果\n")
-        f.write("=" * 50 + "\n")
-        f.write(f"边界点数量: {results['boundary_count']}\n")
-        f.write(f"异常点到边界的Wasserstein距离: {results['anomalous_wasserstein']:.6f}\n")
-        f.write("\n注: 使用Wasserstein距离计算边界指标\n")
-
     total_time = time.time() - total_start_time
     print("=" * 50)
     print("分析完成!")
     print(f"总耗时: {total_time:.2f}秒 ({total_time / 60:.1f}分钟)")
-    print(f"边界点数量: {results['boundary_count']}")
-    print(f"异常点到边界Wasserstein距离: {results['anomalous_wasserstein']:.6f}")
-    print(f"静态图表保存至: {output_path}")
+    print(f"边界点数量: {metrics['boundary_count']}")
+    print(f"异常点到边界Wasserstein距离: {metrics['anomalous_wasserstein']:.6f}")
     print(f"交互式HTML保存至: {html_path}")
     print("=" * 50)
 
