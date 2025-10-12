@@ -8,6 +8,13 @@ import time
 from tqdm import tqdm
 import json
 from pathlib import Path
+import argparse
+
+# 参数化前缀
+parser = argparse.ArgumentParser(description='交互式边界分析可视化，支持多降维方法')
+parser.add_argument('--prefix', type=str, default='TSNE', help='降维方法前缀，如 TSNE、NeuralTSNE、UMAP')
+args = parser.parse_args()
+prefix = args.prefix
 
 # 全局K值设置
 K_NEIGHBORS = 100  # 修改此处即可全局生效
@@ -28,9 +35,9 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 def load_and_normalize_data():
     print("加载并归一化数据...")
 
-    # 数据路径保持和项目根目录对应
-    normal_embedding = np.load(os.path.join(PROJECT_ROOT, 'data', 'features', 'TSNE_embedding.npy'))
-    anomalous_embedding = np.load(os.path.join(PROJECT_ROOT, 'data', 'features', 'anomalous_TSNE_embedding.npy'))
+    # 数据路径根据前缀自动切换
+    normal_embedding = np.load(os.path.join(PROJECT_ROOT, 'data', 'features', f'{prefix}_embedding.npy'))
+    anomalous_embedding = np.load(os.path.join(PROJECT_ROOT, 'data', 'features', f'anomalous_{prefix}_embedding.npy'))
 
     # 合并数据
     combined_embedding = np.vstack([normal_embedding, anomalous_embedding])
@@ -97,7 +104,7 @@ def calculate_wasserstein_metrics(normalized_embedding, labels, boundary_indices
 def generate_interactive_html(normalized_embedding, labels, boundary_indices, metrics):
     print("生成交互式HTML文件...")
 
-    mapping_path = os.path.join(RESULTS_DIR, 'embedding_to_image_mapping.json')
+    mapping_path = os.path.join(RESULTS_DIR, f'embedding_to_image_mapping_{prefix}.json')
     with open(mapping_path, 'r', encoding='utf-8') as f:
         mapping_data = json.load(f)
 
@@ -131,7 +138,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 <head>
     <meta charset=\"UTF-8\">
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-    <title>边界分析可视化 - 交互式</title>
+    <title>{prefix} 边界分析可视化 - 交互式</title>
     {plotly_js_tag}
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700&display=swap" rel="stylesheet">
     <style>
@@ -450,7 +457,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 <body>
     <div class="container">
         <div class="header">
-            <h1>边界分析可视化 · 交互式</h1>
+            <h1>{prefix} 边界分析可视化 · 交互式</h1>
             <div class="sub">点击或圈选点查看对应的手部原始图像</div>
             <div class="pills">
                 <span class="pill" title="邻居数 K">K = {K_NEIGHBORS}</span>
@@ -774,7 +781,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 </html>
     """
 
-    html_path = os.path.join(RESULTS_DIR, 'TSNE.html')
+    html_path = os.path.join(RESULTS_DIR, f'{prefix}.html')
     with open(html_path, 'w', encoding='utf-8') as f:
         f.write(html_content)
 

@@ -1,7 +1,14 @@
 import numpy as np
 import os
 import json
+import argparse
 from pathlib import Path
+
+# 参数化前缀
+parser = argparse.ArgumentParser(description='生成 embedding_to_image_mapping.json，支持多降维方法')
+parser.add_argument('--prefix', type=str, default='TSNE', help='降维方法前缀，如 TSNE、NeuralTSNE、UMAP')
+args = parser.parse_args()
+prefix = args.prefix
 
 # 路径配置
 hands_dir = r'D:\Hand-DR-Project\data\raw\Hands\Hands'
@@ -9,8 +16,8 @@ anom_dir  = r'D:\Hand-DR-Project\data\raw\Anomalous_Hands'
 results_dir = r'D:\Hand-DR-Project\results'
 fail_path = r'D:\Hand-DR-Project\data\features\failed_images.txt'
 
-normal_emb_path = r'D:\Hand-DR-Project\data\features\TSNE_embedding.npy'
-anom_emb_path   = r'D:\Hand-DR-Project\data\features\anomalous_TSNE_embedding.npy'
+normal_emb_path = os.path.join(r'D:\Hand-DR-Project\data\features', f'{prefix}_embedding.npy')
+anom_emb_path   = os.path.join(r'D:\Hand-DR-Project\data\features', f'anomalous_{prefix}_embedding.npy')
 
 # 1. 读取 failed_images
 with open(fail_path, 'r', encoding='utf-8') as f:
@@ -50,10 +57,11 @@ for i, (img, emb) in enumerate(zip(anom_images, anom_embedding)):
 # 合并并保存
 mapping_data = normal_mapping + anom_mapping
 os.makedirs(results_dir, exist_ok=True)
-with open(os.path.join(results_dir, "embedding_to_image_mapping.json"), "w", encoding="utf-8") as f:
+mapping_filename = f"embedding_to_image_mapping_{prefix}.json"
+with open(os.path.join(results_dir, mapping_filename), "w", encoding="utf-8") as f:
     json.dump(mapping_data, f, indent=2, ensure_ascii=False)
 
-print(f"embedding_to_image_mapping.json 已生成！共{len(mapping_data)}条。")
+print(f"{mapping_filename} 已生成！共{len(mapping_data)}条。")
 
 from collections import Counter
 
