@@ -39,6 +39,9 @@ def get_hand_thumb(prefix, index):
 def get_hand_thumb_default(index):
     return get_hand_thumb('TSNE', index)
 
+
+
+# 主页返回纯文本
 @app.route('/')
 def index():
     return 'Image server is running!'

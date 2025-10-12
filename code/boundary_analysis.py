@@ -123,7 +123,8 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
         }
         points_data.append(point_info)
 
-    IMAGE_API_URL = "http://172.16.72.114:5678/api/hand_thumb/"
+    # 直接写死图片接口，兼容 file:// 方式
+    IMAGE_API_PATH = f"http://172.16.72.114:5678/api/hand_thumb/{prefix}/"
 
     # 检查本地 plotly js 是否存在
     local_plotly_path = os.path.join(RESULTS_DIR, 'plotly-2.24.1.min.js')
@@ -538,7 +539,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 {json.dumps(boundary_indices.tolist())}
     </script>
     <script>
-        const IMAGE_API_URL = "{IMAGE_API_URL}";
+    const IMAGE_API_URL = "{IMAGE_API_PATH}";
         const pointsData = JSON.parse(document.getElementById('points-data').textContent);
         const boundaryIndices = JSON.parse(document.getElementById('boundary-indices').textContent);
         let plot = null;
@@ -830,6 +831,15 @@ def main():
     total_start_time = time.time()
 
     normalized_embedding, labels = load_and_normalize_data()
+
+    # 读取对应 mapping，先对齐长度再计算，保证指标/边界点/绘图一致
+    mapping_path = os.path.join(RESULTS_DIR, f'embedding_to_image_mapping_{prefix}.json')
+    with open(mapping_path, 'r', encoding='utf-8') as f:
+        mapping_data = json.load(f)
+    N = len(mapping_data)
+    normalized_embedding = normalized_embedding[:N]
+    labels = labels[:N]
+
     boundary_indices = detect_boundary_fixed_params(normalized_embedding)
     anomalous_wasserstein = calculate_wasserstein_metrics(normalized_embedding, labels, boundary_indices)
     # 只生成交互式 HTML，不生成静态图和 txt
