@@ -24,21 +24,55 @@
             border: 1.5px solid #e3e8f0;
         }
         .header {
+            position: relative;
             text-align: center;
-            margin-bottom: 32px;
-            padding-bottom: 18px;
-            border-bottom: 2px solid #e3e8f0;
+            margin-bottom: 28px;
+            padding: 24px 18px 28px 18px;
+            border-radius: 14px;
+            background: linear-gradient(90deg, rgba(54,209,196,0.15) 0%, rgba(91,134,229,0.15) 100%);
+            border: 1px solid #e3e8f0;
+        }
+        .header::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 14px;
+            box-shadow: 0 10px 28px rgba(91, 134, 229, 0.18) inset;
+            pointer-events: none;
         }
         .header h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: #2b5876;
-            letter-spacing: 2px;
-            margin-bottom: 8px;
+            font-size: 2.2rem;
+            font-weight: 800;
+            background: linear-gradient(90deg, #2b5876 0%, #4e4376 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            letter-spacing: 1.2px;
+            margin: 0 0 10px 0;
         }
-        .header p {
+        .header .sub {
             color: #5a6d8a;
-            font-size: 1.1rem;
+            font-size: 1.02rem;
+            margin: 0 auto 10px auto;
+        }
+        .pills {
+            display: inline-flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 8px;
+        }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #ffffff;
+            border: 1px solid #e3e8f0;
+            color: #2b5876;
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-weight: 600;
+            font-size: 0.92rem;
+            box-shadow: 0 2px 8px rgba(31, 38, 135, 0.08);
         }
         .content {
             display: flex;
@@ -66,24 +100,129 @@
             min-width: 320px;
         }
         .metrics {
-            background: linear-gradient(90deg, #e0eafc 0%, #cfdef3 100%);
-            padding: 18px 20px;
-            border-radius: 10px;
-            margin-bottom: 22px;
-            box-shadow: 0 1px 6px 0 rgba(31, 38, 135, 0.06);
+            margin-bottom: 18px;
         }
-        .metric-item {
-            margin: 10px 0;
-            font-size: 1.08rem;
-            color: #2b5876;
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+        @media (max-width: 900px) {
+            .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 560px) {
+            .metrics-grid { grid-template-columns: 1fr; }
+        }
+        .metric-card {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 12px;
+            border-radius: 12px;
+            border: 1px solid #e3e8f0;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            box-shadow: 0 4px 12px rgba(31, 38, 135, 0.08);
+        }
+        .metric-icon {
+            width: 34px; height: 34px; border-radius: 10px; flex: 0 0 34px;
+            display: grid; place-items: center; font-size: 18px; font-weight: 800; color: #fff;
+            background: linear-gradient(135deg, #36d1c4 0%, #5b86e5 100%);
+            box-shadow: 0 4px 10px rgba(91, 134, 229, 0.28);
+        }
+        .metric-content strong {
+            display: block; font-size: 1.06rem; color: #2b5876;
+        }
+        .metric-content span {
+            display: block; font-size: 0.86rem; color: #5a6d8a;
         }
         .point-info {
             margin-top: 18px;
-            padding: 12px 10px;
-            background: #fffbe7;
-            border-radius: 8px;
+            padding: 16px 14px;
+            background: linear-gradient(180deg, #fffdf3 0%, #fff8d6 100%);
+            border-radius: 12px;
             font-size: 1.01rem;
-            box-shadow: 0 1px 4px 0 rgba(255, 215, 0, 0.07);
+            box-shadow: 0 6px 18px rgba(255, 215, 0, 0.15);
+            border: 1px solid #f3e7a9;
+        }
+        .point-info h3 {
+            margin: 0 0 10px 0;
+            font-size: 1.15rem;
+            color: #8a6d00;
+        }
+        .info-header {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: #fff;
+            border: 1px solid #f0e6a6;
+            color: #6b5b00;
+            font-weight: 600;
+            font-size: 0.95rem;
+            box-shadow: 0 1px 4px rgba(138, 109, 0, 0.08);
+        }
+        .chip .dot {
+            width: 8px; height: 8px; border-radius: 50%; background: #d4a017;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 0.85rem;
+            letter-spacing: 0.3px;
+            border: 1px solid transparent;
+        }
+        .badge-normal {
+            background: linear-gradient(135deg, #e3f2ff 0%, #f0f7ff 100%);
+            color: #1a6bb8;
+            border-color: #cfe7ff;
+        }
+        .badge-anomalous {
+            background: linear-gradient(135deg, #ffe3f0 0%, #fff0f5 100%);
+            color: #b81a4c;
+            border-color: #ffd1e6;
+        }
+        .badge-yes {
+            background: linear-gradient(135deg, #e7ffe9 0%, #f2fff4 100%);
+            color: #0e7a2f;
+            border-color: #c9f1d2;
+        }
+        .badge-no {
+            background: #f5f7fb;
+            color: #6b778c;
+            border-color: #e1e7f0;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 8px;
+        }
+        .info-item {
+            background: #ffffff;
+            border: 1px solid #efe6b2;
+            border-radius: 10px;
+            padding: 10px 12px;
+            box-shadow: 0 1px 6px rgba(138, 109, 0, 0.06);
+        }
+        .info-item span {
+            display: block;
+            font-size: 0.78rem;
+            color: #8a6d00;
+            opacity: 0.8;
+        }
+        .info-item strong {
+            font-size: 1.05rem;
+            color: #4a3b00;
         }
         .image-preview {
             display: flex;
@@ -184,15 +323,44 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>边界分析可视化 - 交互式</h1>
-            <p>点击或圈选点查看对应的手部原始图像 (K=100, Threshold=0.7)</p>
+            <h1>边界分析可视化 · 交互式</h1>
+            <div class="sub">点击或圈选点查看对应的手部原始图像</div>
+            <div class="pills">
+                <span class="pill" title="邻居数 K">K = 100</span>
+                <span class="pill" title="阈值">Threshold = 0.7</span>
+            </div>
         </div>
         <div class="metrics">
-            <h3>分析指标</h3>
-            <div class="metric-item"><strong>边界点数量:</strong> 945</div>
-            <div class="metric-item"><strong>Wasserstein距离:</strong> 0.022922</div>
-            <div class="metric-item"><strong>正常样本:</strong> 10309</div>
-            <div class="metric-item"><strong>异常样本:</strong> 144</div>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-icon">B</div>
+                    <div class="metric-content">
+                        <strong>边界点数量</strong>
+                        <span>945</span>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">W</div>
+                    <div class="metric-content">
+                        <strong>Wasserstein 距离</strong>
+                        <span>0.022922</span>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">N</div>
+                    <div class="metric-content">
+                        <strong>正常样本</strong>
+                        <span>10309</span>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">A</div>
+                    <div class="metric-content">
+                        <strong>异常样本</strong>
+                        <span>144</span>
+                    </div>
+                </div>
+            </div>
         </div>
         <div class="legend">
             <div class="legend-item"><div class="legend-color normal-color"></div>正常手部图像</div>
@@ -361,11 +529,21 @@
 
             currentPointIndex = pointIndex;
 
+            const typeBadgeClass = point.cluster === 'normal' ? 'badge-normal' : 'badge-anomalous';
+            const boundaryBadgeClass = point.is_boundary ? 'badge-yes' : 'badge-no';
+            const typeText = point.cluster === 'normal' ? '正常' : '异常';
+            const boundaryText = point.is_boundary ? '边界点: 是' : '边界点: 否';
+
             document.getElementById('point-info-content').innerHTML = `
-                <div><strong>索引:</strong> ${point.index}</div>
-                <div><strong>坐标:</strong> (${point.x.toFixed(3)}, ${point.y.toFixed(3)})</div>
-                <div><strong>类型:</strong> ${point.cluster === 'normal' ? '正常' : '异常'}</div>
-                <div><strong>边界点:</strong> ${point.is_boundary ? '是' : '否'}</div>
+                <div class="info-header">
+                    <span class="chip" title="唯一索引"><span class="dot"></span> ID #${point.index}</span>
+                    <span class="badge ${typeBadgeClass}" title="样本类型">类型: ${typeText}</span>
+                    <span class="badge ${boundaryBadgeClass}" title="是否属于边界">${boundaryText}</span>
+                </div>
+                <div class="info-grid">
+                    <div class="info-item"><span>坐标 X</span><strong>${point.x.toFixed(5)}</strong></div>
+                    <div class="info-item"><span>坐标 Y</span><strong>${point.y.toFixed(5)}</strong></div>
+                </div>
             `;
 
             const imgElement = document.getElementById('preview-image');
@@ -382,7 +560,7 @@
                 imgElement.style.display = 'block';
             };
             imgElement.onerror = function() {
-                caption.textContent = '图像加载失败';
+                caption.textContent = '等待选择';
                 imgElement.style.display = 'none';
             };
 
