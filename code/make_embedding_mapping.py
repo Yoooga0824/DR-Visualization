@@ -27,10 +27,11 @@ with open(fail_path, 'r', encoding='utf-8') as f:
 all_normal_images = sorted(list(Path(hands_dir).glob("Hand_*.jpg")))
 normal_images = [img for img in all_normal_images if img.name not in failed]
 
+
 # 3. 加载 embedding
 normal_embedding = np.load(normal_emb_path)
-assert len(normal_images) == len(normal_embedding), (
-    f"过滤后正常图片数({len(normal_images)})应和embedding数({len(normal_embedding)})一致！")
+if len(normal_images) != len(normal_embedding):
+    raise ValueError(f"过滤后正常图片数({len(normal_images)})应和embedding数({len(normal_embedding)})严格一致！")
 
 normal_mapping = []
 for i, (img, emb) in enumerate(zip(normal_images, normal_embedding)):
