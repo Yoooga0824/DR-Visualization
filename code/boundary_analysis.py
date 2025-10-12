@@ -17,6 +17,10 @@ from tool_functions import wasserstein_loss
 
 print("成功导入wasserstein_loss函数")
 
+
+# 全局K值设置
+K_NEIGHBORS = 100  # 修改此处即可全局生效
+
 # 获取和code同级的results目录
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(PROJECT_ROOT, 'results')
@@ -53,8 +57,8 @@ def detect_boundary_fixed_params(normalized_embedding):
 
     start_time = time.time()
 
-    # 使用固定参数
-    boundary_points, B = bd_lle(normalized_embedding, d=2, K=110)
+    # 使用全局K值
+    boundary_points, B = bd_lle(normalized_embedding, d=2, K=K_NEIGHBORS)
 
     # 计算耗时
     computation_time = time.time() - start_time
@@ -115,44 +119,201 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 
     IMAGE_API_URL = "http://172.16.72.114:5678/api/hand_thumb/"
 
+    # 检查本地 plotly js 是否存在
+    local_plotly_path = os.path.join(RESULTS_DIR, 'plotly-2.24.1.min.js')
+    if os.path.exists(local_plotly_path):
+        plotly_js_tag = f'<script src="./plotly-2.24.1.min.js"></script>'
+    else:
+        plotly_js_tag = '<script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>'
+
     html_content = f"""
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang=\"zh-CN\">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset=\"UTF-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
     <title>边界分析可视化 - 交互式</title>
-    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    {plotly_js_tag}
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700&display=swap" rel="stylesheet">
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }}
-        .container {{ max-width: 1400px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-        .header {{ text-align: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #eee; }}
-        .content {{ display: flex; gap: 20px; min-height: 600px; }}
-        .plot-container {{ flex: 3; border: 1px solid #ddd; border-radius: 4px; padding: 10px; background: #fafafa; }}
-        .info-panel {{ flex: 1; border: 1px solid #ddd; border-radius: 4px; padding: 15px; background: #f9f9f9; min-width: 300px; }}
-        .metrics {{ background: #e8f4fd; padding: 15px; border-radius: 4px; margin-bottom: 20px; }}
-        .metric-item {{ margin: 8px 0; font-size: 14px; }}
-        .point-info {{ margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 4px; font-size: 14px; }}
-        .image-preview {{ text-align: center; margin-top: 20px; }}
-        #preview-image {{ max-width: 100%; max-height: 300px; border-radius: 5px; display: none; }}
-        .selected-images {{ margin-top: 20px; max-height: 400px; overflow-y: auto; }}
-        .selected-image {{ margin: 5px; border: 1px solid #ddd; border-radius: 3px; padding: 5px; }}
-        .controls {{ margin-bottom: 20px; text-align: center; }}
-        .btn {{ background-color: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin: 0 5px; }}
-        .btn:hover {{ background-color: #45a049; }}
-        .legend {{ display: flex; justify-content: center; margin: 15px 0; flex-wrap: wrap; }}
-        .legend-item {{ display: flex; align-items: center; margin: 0 10px; }}
-        .legend-color {{ width: 15px; height: 15px; margin-right: 5px; border-radius: 50%; }}
-        .normal-color {{ background-color: lightblue; }}
-        .anomalous-color {{ background-color: red; }}
-        .boundary-color {{ background-color: green; }}
+        body {{
+            font-family: 'Montserrat', Arial, sans-serif;
+            margin: 0; padding: 0;
+            min-height: 100vh;
+            background: linear-gradient(120deg, #e0eafc 0%, #cfdef3 100%);
+        }}
+        .container {{
+            max-width: 1400px;
+            margin: 32px auto;
+            background: #fff;
+            padding: 32px 24px 24px 24px;
+            border-radius: 18px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.18);
+            border: 1.5px solid #e3e8f0;
+        }}
+        .header {{
+            text-align: center;
+            margin-bottom: 32px;
+            padding-bottom: 18px;
+            border-bottom: 2px solid #e3e8f0;
+        }}
+        .header h1 {{
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #2b5876;
+            letter-spacing: 2px;
+            margin-bottom: 8px;
+        }}
+        .header p {{
+            color: #5a6d8a;
+            font-size: 1.1rem;
+        }}
+        .content {{
+            display: flex;
+            gap: 28px;
+            min-height: 600px;
+        }}
+        @media (max-width: 1100px) {{
+            .content {{ flex-direction: column; }}
+        }}
+        .plot-container {{
+            flex: 3;
+            border-radius: 12px;
+            background: #f7fafd;
+            box-shadow: 0 2px 12px 0 rgba(31, 38, 135, 0.07);
+            padding: 18px 10px 10px 10px;
+            border: 1.5px solid #e3e8f0;
+        }}
+        .info-panel {{
+            flex: 1;
+            border-radius: 12px;
+            background: #f9fbfd;
+            box-shadow: 0 2px 12px 0 rgba(31, 38, 135, 0.07);
+            padding: 20px 18px;
+            border: 1.5px solid #e3e8f0;
+            min-width: 320px;
+        }}
+        .metrics {{
+            background: linear-gradient(90deg, #e0eafc 0%, #cfdef3 100%);
+            padding: 18px 20px;
+            border-radius: 10px;
+            margin-bottom: 22px;
+            box-shadow: 0 1px 6px 0 rgba(31, 38, 135, 0.06);
+        }}
+        .metric-item {{
+            margin: 10px 0;
+            font-size: 1.08rem;
+            color: #2b5876;
+        }}
+        .point-info {{
+            margin-top: 18px;
+            padding: 12px 10px;
+            background: #fffbe7;
+            border-radius: 8px;
+            font-size: 1.01rem;
+            box-shadow: 0 1px 4px 0 rgba(255, 215, 0, 0.07);
+        }}
+        .image-preview {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-top: 24px;
+        }}
+        #preview-image {{
+            max-width: 100%;
+            max-height: 600px;
+            width: auto;
+            height: auto;
+            border-radius: 12px;
+            display: none;
+            box-shadow: 0 4px 24px 0 rgba(31, 38, 135, 0.18);
+            transition: box-shadow 0.2s;
+            margin: 0 auto;
+        }}
+        #preview-image:hover {{
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.22);
+        }}
+        .selected-images {{
+            margin-top: 24px;
+            max-height: 400px;
+            overflow-y: auto;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: flex-start;
+        }}
+        .selected-image {{
+            margin: 0;
+            border: 1.5px solid #e3e8f0;
+            border-radius: 7px;
+            padding: 7px 7px 4px 7px;
+            background: #fff;
+            box-shadow: 0 1px 4px 0 rgba(31, 38, 135, 0.07);
+            transition: box-shadow 0.2s, border 0.2s;
+        }}
+        .selected-image:hover {{
+            box-shadow: 0 4px 16px 0 rgba(31, 38, 135, 0.13);
+            border: 1.5px solid #a0b8d8;
+        }}
+        .selected-image img {{
+            max-width: 110px;
+            max-height: 110px;
+            border-radius: 5px;
+            margin-bottom: 4px;
+        }}
+        .controls {{
+            margin: 24px 0 0 0;
+            text-align: center;
+        }}
+        .btn {{
+            background: linear-gradient(90deg, #36d1c4 0%, #5b86e5 100%);
+            color: white;
+            padding: 11px 28px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.08rem;
+            font-weight: 600;
+            margin: 0 8px;
+            box-shadow: 0 2px 8px 0 rgba(91, 134, 229, 0.10);
+            transition: background 0.2s, box-shadow 0.2s;
+        }}
+        .btn:hover {{
+            background: linear-gradient(90deg, #5b86e5 0%, #36d1c4 100%);
+            box-shadow: 0 4px 16px 0 rgba(91, 134, 229, 0.18);
+        }}
+        .legend {{
+            display: flex;
+            justify-content: center;
+            margin: 18px 0 10px 0;
+            flex-wrap: wrap;
+            gap: 18px;
+        }}
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            font-size: 1.05rem;
+            color: #4a6073;
+        }}
+        .legend-color {{
+            width: 18px;
+            height: 18px;
+            margin-right: 7px;
+            border-radius: 50%;
+            border: 2.5px solid #e3e8f0;
+            box-shadow: 0 1px 4px 0 rgba(31, 38, 135, 0.07);
+        }}
+        .normal-color {{ background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); }}
+        .anomalous-color {{ background: linear-gradient(135deg, #f857a6 0%, #ff5858 100%); }}
+        .boundary-color {{ background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }}
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>边界分析可视化 - 交互式</h1>
-            <p>点击或圈选点查看对应的手部原始图像 (K=110, Threshold=0.7)</p>
+            <p>点击或圈选点查看对应的手部原始图像 (K={K_NEIGHBORS}, Threshold=0.7)</p>
         </div>
         <div class="metrics">
             <h3>分析指标</h3>
@@ -179,7 +340,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 <div class="image-preview">
                     <h3>图像预览</h3>
                     <div id="image-preview-content">
-                        <p>选择点后显示对应图像</p>
+                        <p id="image-caption">选择点后显示对应图像</p>
                         <img id="preview-image" alt="预览图像">
                     </div>
                 </div>
@@ -196,13 +357,20 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
             </div>
         </div>
     </div>
+    <script type="application/json" id="points-data">
+{json.dumps(points_data, ensure_ascii=False)}
+    </script>
+    <script type="application/json" id="boundary-indices">
+{json.dumps(boundary_indices.tolist())}
+    </script>
     <script>
         const IMAGE_API_URL = "{IMAGE_API_URL}";
-        const pointsData = {json.dumps(points_data)};
-        const boundaryIndices = {json.dumps(boundary_indices.tolist())};
+        const pointsData = JSON.parse(document.getElementById('points-data').textContent);
+        const boundaryIndices = JSON.parse(document.getElementById('boundary-indices').textContent);
         let plot = null;
         let currentPointIndex = null;
         let selectedPoints = [];
+        let currentDragMode = 'zoom'; // 默认缩放模式
 
         function initPlot() {{
             const normalPoints = pointsData.filter(p => p.cluster === 'normal' && !p.is_boundary);
@@ -244,7 +412,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
             }};
 
             const layout = {{
-                title: '边界分析可视化 (K=110, Threshold=0.7)',
+                title: '边界分析可视化 (K={K_NEIGHBORS}, Threshold=0.7)',
                 xaxis: {{ title: '成分 1 (归一化)' }},
                 yaxis: {{ title: '成分 2 (归一化)' }},
                 hovermode: 'closest',
@@ -252,12 +420,16 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 height: 600,
                 plot_bgcolor: '#fafafa',
                 paper_bgcolor: '#ffffff',
-                dragmode: 'lasso'  // 可选改成 'select'
+                dragmode: 'zoom'  // 默认缩放模式
             }};
             const config = {{ responsive: true, displayModeBar: true, displaylogo: false, modeBarButtonsToAdd: ['toggleHover', 'resetViews'], scrollZoom: true }};
             plot = Plotly.newPlot('plotly-chart', [traceNormal, traceAnomalous, traceBoundary], layout, config);
 
             document.getElementById('plotly-chart').on('plotly_click', function(data) {{
+                // 在框选/套索模式下禁用单点预览
+                if (currentDragMode === 'lasso' || currentDragMode === 'select') {{
+                    return;
+                }}
                 if (data.points && data.points.length > 0) {{
                     const pointIndex = data.points[0].customdata;
                     if (pointIndex !== null && pointIndex !== undefined) {{
@@ -274,12 +446,39 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                         }}
                     }});
                     showSelectedImages(selectedPoints);
+                    // 选择时隐藏单图预览
+                    const imgEl = document.getElementById('preview-image');
+                    const caption = document.getElementById('image-caption');
+                    if (imgEl) {{ imgEl.style.display = 'none'; imgEl.src = ''; }}
+                    if (caption) {{ caption.textContent = `已圈选 ${{selectedPoints.length}} 个点，单图预览已隐藏`; }}
                 }}
             }});
             document.getElementById('plotly-chart').on('plotly_deselect', function() {{
                 selectedPoints = [];
                 document.getElementById('selected-images-content').innerHTML = '<p>圈选多个点后显示所有图像</p>';
+                // 取消选择时也重置预览
+                const imgEl = document.getElementById('preview-image');
+                const caption = document.getElementById('image-caption');
+                if (imgEl) {{ imgEl.style.display = 'none'; imgEl.src = ''; }}
+                if (caption) {{ caption.textContent = '选择点后显示对应图像'; }}
+                // 恢复所有点的高亮（selectedpoints=null），并刷新图表
                 Plotly.restyle('plotly-chart', {{'selectedpoints': null}});
+                Plotly.redraw('plotly-chart');
+                // 清除图上的框选叠加层与可能残留的形状
+                Plotly.relayout('plotly-chart', {{'selections': [], 'shapes': []}});
+            }});
+
+            // 监听工具切换（拖拽模式变化），当退出框选/套索时清空框选
+            document.getElementById('plotly-chart').on('plotly_relayout', function(eventData) {{
+                if (eventData && eventData['dragmode']) {{
+                    currentDragMode = eventData['dragmode'];
+                    if (currentDragMode !== 'lasso' && currentDragMode !== 'select') {{
+                        clearSelectionUI();
+                        // 立即恢复全图高光
+                        Plotly.restyle('plotly-chart', {{'selectedpoints': null}});
+                        Plotly.redraw('plotly-chart');
+                    }}
+                }}
             }});
         }}
 
@@ -298,17 +497,24 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
             `;
 
             const imgElement = document.getElementById('preview-image');
-            const imagePreview = document.getElementById('image-preview-content');
-            const imgUrl = IMAGE_API_URL + point.index;
-            imgElement.src = imgUrl;
+            const caption = document.getElementById('image-caption');
+            const imgUrl = IMAGE_API_URL + point.index + `?t=${{Date.now()}}`; // 避免缓存
+
+            // 先设置占位文本并显示图片占位
+            caption.textContent = '正在加载图像…';
+            imgElement.style.display = 'block';
+
+            // 绑定事件（每次重设，避免堆叠）
             imgElement.onload = function() {{
+                caption.textContent = '手部图像预览';
                 imgElement.style.display = 'block';
-                imagePreview.innerHTML = '<p>手部图像预览</p>';
             }};
             imgElement.onerror = function() {{
+                caption.textContent = '图像加载失败';
                 imgElement.style.display = 'none';
-                imagePreview.innerHTML = '<p>该点对应的图像未找到</p>';
             }};
+
+            imgElement.src = imgUrl;
         }}
 
         function showSelectedImages(pointIndices) {{
@@ -325,13 +531,17 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 if (point) {{
                     const imgDiv = document.createElement('div');
                     imgDiv.className = 'selected-image';
-                    const imgUrl = IMAGE_API_URL + point.index;
+                    const imgUrl = IMAGE_API_URL + point.index + `?t=${{Date.now()}}`;
                     imgDiv.innerHTML = `
                         <div><strong>索引 ${{point.index}}</strong></div>
-                        <img src="${{imgUrl}}" alt="手部图像 ${{point.index}}" style="max-width: 100px; max-height: 100px;" onerror="this.style.display='none'">
+                        <img src="${{imgUrl}}" alt="手部图像 ${{point.index}}" style="max-width: 100px; max-height: 100px; cursor:pointer;" onerror="this.style.display='none'">
                         <div>类型: ${{point.cluster === 'normal' ? '正常' : '异常'}}</div>
                         <div>边界点: ${{point.is_boundary ? '是' : '否'}}</div>
                     `;
+                    // 点击缩略图放大到右侧大图预览
+                    imgDiv.querySelector('img').onclick = function() {{
+                        showPointInfo(point.index);
+                    }};
                     selectedImagesContent.appendChild(imgDiv);
                 }}
             }});
@@ -353,14 +563,30 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
         function resetView() {{
             Plotly.relayout('plotly-chart', {{
                 'xaxis.range': [0, 1],
-                'yaxis.range': [0, 1]
+                'yaxis.range': [0, 1],
+                'selections': [],
+                'shapes': []
             }});
             selectedPoints = [];
             document.getElementById('point-info-content').innerHTML = '点击图表中的点查看详细信息';
-            document.getElementById('preview-image').style.display = 'none';
-            document.getElementById('image-preview-content').innerHTML = '<p>选择点后显示对应图像</p>';
+            const imgEl = document.getElementById('preview-image');
+            const caption = document.getElementById('image-caption');
+            if (imgEl) {{ imgEl.style.display = 'none'; imgEl.src = ''; }}
+            if (caption) {{ caption.textContent = '选择点后显示对应图像'; }}
             document.getElementById('selected-images-content').innerHTML = '<p>圈选多个点后显示所有图像</p>';
             Plotly.restyle('plotly-chart', {{'selectedpoints': null}});
+        }}
+
+        function clearSelectionUI() {{
+            selectedPoints = [];
+            document.getElementById('selected-images-content').innerHTML = '<p>圈选多个点后显示所有图像</p>';
+            const imgEl = document.getElementById('preview-image');
+            const caption = document.getElementById('image-caption');
+            if (imgEl) {{ imgEl.style.display = 'none'; imgEl.src = ''; }}
+            if (caption) {{ caption.textContent = '选择点后显示对应图像'; }}
+            Plotly.restyle('plotly-chart', {{'selectedpoints': null}});
+            // 同步清除图上的框选/套索轮廓和可能的形状
+            Plotly.relayout('plotly-chart', {{'selections': [], 'shapes': []}});
         }}
 
         document.addEventListener('DOMContentLoaded', function() {{
@@ -409,8 +635,7 @@ def visualize_results(normalized_embedding, labels, boundary_indices):
     output_path = os.path.join(RESULTS_DIR, 'TSNE_analysis.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"可视化图表已保存至: {output_path}")
-
-    plt.show()
+    # 不弹出窗口
     return output_path
 
 def main():
