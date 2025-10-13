@@ -1,4 +1,4 @@
-# Hand-DR-Project 使用说明（中文）
+# DR-Visualization 使用说明（中文）
 
 一个用于手部图像降维可视化与边界分析的小型工作流，包括：
 - 生成 embedding 与原始图像的一一映射（mapping）
@@ -7,21 +7,21 @@
 
 当前已支持多种降维方法前缀（如 TSNE、NeuralTSNE、UMAP 等），每种方法可独立生成 mapping 和 HTML。
 
-先在D:\Hand-DR-Project\data\features中导入xxx_embedding.npy和anomalous_xxx_embedding.npy
-再运行make_embedding_mapping.py生成D:\Hand-DR-Project\results\embedding_to_image_mapping_xxx.json
-最后运行main.py
+将降维结果放入本仓库下的 data/*-features 目录（例如 data/Hands-features 或 data/yalefaces-features）中：
+- <prefix>_embedding.npy 和 anomalous_<prefix>_embedding.npy
+然后运行 make_embedding_mapping.py 和 boundary_analysis.py 生成映射与 HTML；也可用 main.py 批量处理。
 
 ---
 
 ## 目录结构
 
 ```
-Hand-DR-Project/
+DR-Visualization/
 ├─ code/
 │  ├─ main.py                     # 批量入口（交互选择方法或指定 --prefix）
 │  ├─ make_embedding_mapping.py   # 生成映射 JSON（embedding ↔ 图片）
 │  ├─ boundary_analysis.py        # 生成交互式 HTML（含边界检测与指标）
-│  ├─ image_server.py             # Flask 图片缩略图服务（/api/hand_thumb/<prefix>/<index>）
+│  ├─ image_server.py             # Flask 图片缩略图服务（/api/hand_thumb/<prefix>/<index>?dataset=<dataset>）
 │  ├─ tool_functions.py           # 工具函数（含 wasserstein_loss）
 │  └─ detection/BDLLE.py          # 边界检测算法（BD-LLE）
 │
@@ -29,17 +29,18 @@ Hand-DR-Project/
 │  ├─ raw/
 │  │  ├─ Hands/Hands/             # 正常样本图片目录（Hand_*.jpg）
 │  │  └─ Anomalous_Hands/         # 异常样本图片目录（*.jpg）
-│  └─ features/
-│     ├─ <prefix>_embedding.npy               # 正常样本降维向量
-│     ├─ anomalous_<prefix>_embedding.npy     # 异常样本降维向量
-│     ├─ failed_images.txt                    # 正常样本默认过滤清单（可选）
-│     ├─ failed_images_<prefix>.txt           # 正常样本按前缀过滤清单（可选）
-│     ├─ anomalous_failed_images.txt          # 异常样本默认过滤清单（可选）
-│     └─ anomalous_failed_images_<prefix>.txt # 异常样本按前缀过滤清单（可选）
+│  ├─ Hands-features/ 或 yalefaces-features/
+│  │  ├─ <prefix>_embedding.npy               # 正常样本降维向量
+│  │  ├─ anomalous_<prefix>_embedding.npy     # 异常样本降维向量
+│  │  ├─ failed_images.txt                    # 正常样本默认过滤清单（可选）
+│  │  ├─ failed_images_<prefix>.txt           # 正常样本按前缀过滤清单（可选）
+│  │  ├─ anomalous_failed_images.txt          # 异常样本默认过滤清单（可选）
+│  │  └─ anomalous_failed_images_<prefix>.txt # 异常样本按前缀过滤清单（可选）
 │
 └─ results/
-   ├─ embedding_to_image_mapping_<prefix>.json # 每种方法的映射文件
-   └─ <prefix>.html                           # 每种方法的交互式可视化页面
+  ├─ <dataset>-results/
+  │  ├─ embedding_to_image_mapping_<prefix>.json # 每种方法的映射文件
+  │  └─ <prefix>.html                           # 每种方法的交互式可视化页面
 ```
 
 ---
@@ -61,7 +62,7 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
 1) 准备数据
 - 将正常样本在 `data/raw/Hands/Hands/`，命名形如 `Hand_*.jpg`
 - 将异常样本在 `data/raw/Anomalous_Hands/`
-- 将降维结果放入 `data/features/`：
+- 将降维结果放入 `data/*-features/`：
   - 正常：`<prefix>_embedding.npy`
   - 异常：`anomalous_<prefix>_embedding.npy`
 
@@ -73,14 +74,14 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
 
 3) 启动图片服务（建议先启动）
 - `python code/image_server.py`
-- 服务默认监听 `0.0.0.0:5678`，接口：`/api/hand_thumb/<prefix>/<index>`
+- 服务默认监听 `0.0.0.0:5678`，接口：`/api/hand_thumb/<prefix>/<index>?dataset=<dataset>`（dataset 可选，但建议带上以精确匹配映射文件所在数据集）
 
 4) 生成交互式 HTML
-- `python code/boundary_analysis.py --prefix TSNE`
-- 生成 `results/TSNE.html`，可直接双击用浏览器打开（file:// 方式）
+- `python code/boundary_analysis.py --prefix TSNE --features-dir data/Hands-features`
+- 生成 `results/Hands-results/TSNE.html`，可直接双击用浏览器打开（file:// 方式）
 
 5) 打开页面
-- 打开 `results/<prefix>.html` 即可交互查看、点击/圈选显示图像。
+- 打开 `results/<dataset>-results/<prefix>.html` 即可交互查看、点击/圈选显示图像。
 
 ---
 
@@ -113,7 +114,7 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
 
 ## 映射与图片 API 说明
 
-- 映射文件：`results/embedding_to_image_mapping_<prefix>.json`
+- 映射文件：`results/<dataset>-results/embedding_to_image_mapping_<prefix>.json`
   - 正常样本 index 从 0 开始，异常样本紧接其后，保证全局唯一连续
   - 每条记录包含：
     - `index`：全局索引
@@ -121,19 +122,20 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
     - `image_path`：该样本图片绝对路径
     - `features`：预留字段
 
-- 图片接口：`/api/hand_thumb/<prefix>/<index>`
-  - 由 `code/image_server.py` 提供，会读取对应 `mapping_<prefix>.json`，根据 index 找到图片并返回一个 200x200 的 JPEG 缩略图
+- 图片接口：`/api/hand_thumb/<prefix>/<index>?dataset=<dataset>`
+  - 由 `code/image_server.py` 提供，会读取对应 `results/<dataset>-results/embedding_to_image_mapping_<prefix>.json`，根据 index 找到图片并返回一个 200x200 的 JPEG 缩略图；
+  - 若省略 `dataset` 参数，服务会在 `results/` 递归搜索匹配的映射文件；若历史 JSON 中包含旧绝对路径（如 D:\\Hand-DR-Project），服务会尝试在运行时自动修复到当前仓库的 `data/` 目录。
 
 ---
 
 ## HTML 图片显示与 IP 设置
 
 - 生成的 HTML 中，图片接口 URL 为写死的绝对地址，示例：
-  - `http://<你的机器IP>:5678/api/hand_thumb/<prefix>/`
+  - `http://<你的机器IP>:5678/api/hand_thumb/<prefix>/?dataset=<dataset>`（末尾再拼上索引）
 - 请确保：
   1. `image_server.py` 已在该 IP:5678 上运行
   2. 防火墙允许 5678 端口访问（内网环境）
-  3. 如果你的机器 IP 不是代码里写死的值，请修改 `code/boundary_analysis.py` 中的 `IMAGE_API_PATH`，或重新生成 HTML。
+    3. 如果你的机器 IP 不是代码里写死的值，请修改 `code/boundary_analysis.py` 中的 `IMAGE_API_PATH`，或重新生成 HTML。`boundary_analysis.py` 已默认在生成的 URL 中附加 `?dataset=<dataset>`，并会在点击时追加时间戳 `t=...` 作为缓存清理参数。
 
 ---
 
@@ -168,12 +170,12 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
   - `--anom-list` 指定异常图片清单（绝对路径或文件名，逐行一条）
 
 - 新增一种降维方法的接入
-  - 将 `<prefix>_embedding.npy` 与 `anomalous_<prefix>_embedding.npy` 放入 `data/features/`
+  - 将 `<prefix>_embedding.npy` 与 `anomalous_<prefix>_embedding.npy` 放入 `data/*-features/`
   - 运行 `python code/main.py` 选择该方法即可
 
 ---
 
 ## 备注
 
-- 本项目主要在 Windows 环境（路径使用绝对盘符）下开发与测试。
-- 如需迁移到其他平台，请统一路径风格与服务 IP/端口配置。
+- 本项目主要在 Windows 环境下开发与测试。
+- 已移除硬编码的旧路径“D:\\Hand-DR-Project”，若历史结果 JSON 中仍含有旧盘符，图片服务会在运行时尝试自动回退修复为当前仓库下的 data 目录。

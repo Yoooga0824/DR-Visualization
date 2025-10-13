@@ -4,28 +4,92 @@ import json
 import argparse
 from pathlib import Path
 
-# 参数化前缀
-parser = argparse.ArgumentParser(description='生成 embedding_to_image_mapping.json，支持多降维方法')
+
+# 参数化前缀和所有路径
+parser = argparse.ArgumentParser(description='生成 embedding_to_image_mapping.json，支持多降维方法和多数据集')
 parser.add_argument('--prefix', type=str, default='TSNE', help='降维方法前缀，如 TSNE、NeuralTSNE、UMAP')
+parser.add_argument('--features-dir', type=str, default=None, help='features 目录（如 data/Hands-features），自动推断数据集名')
+parser.add_argument('--raw-dir', type=str, default=None, help='原始图片目录（如 data/raw/Hands/Hands），如未指定自动推断')
+parser.add_argument('--anom-dir', type=str, default=None, help='异常图片目录（如 data/raw/Anomalous_Hands 或 data/raw/Anomalous_yalefaces），如未指定自动推断')
+parser.add_argument('--results-dir', type=str, default=None, help='结果保存目录（如 results/Hands-results），如未指定自动推断')
 parser.add_argument('--no-filter', action='store_true', help='不使用 failed_images 过滤（同时影响正常与异常样本）')
 parser.add_argument('--anom-list', type=str, help='指定异常图片清单文件（每行一个文件名或绝对路径），用于精确匹配与排序异常图片')
 args = parser.parse_args()
 prefix = args.prefix
 
-# 路径配置
-hands_dir = r'D:\Hand-DR-Project\data\raw\Hands\Hands'
-anom_dir  = r'D:\Hand-DR-Project\data\raw\Anomalous_Hands'
-results_dir = r'D:\Hand-DR-Project\results'
-default_fail_path = r'D:\Hand-DR-Project\data\features\failed_images.txt'
-prefix_fail_path = os.path.join(r'D:\Hand-DR-Project\data\features', f'failed_images_{prefix}.txt')
+
+# 自动推断 features 目录
+# 优先使用传入参数；否则在项目 data 目录下查找任意 *-features 目录：
+if args.features_dir:
+    features_dir = os.path.abspath(args.features_dir)
+else:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    data_root = os.path.join(project_root, 'data')
+    candidates = []
+    if os.path.isdir(data_root):
+        for name in os.listdir(data_root):
+            p = os.path.join(data_root, name)
+            if os.path.isdir(p) and name.endswith('-features'):
+                candidates.append(p)
+    if len(candidates) == 1:
+        features_dir = os.path.abspath(candidates[0])
+        print(f"未指定 --features-dir，自动选择: {features_dir}")
+    elif len(candidates) > 1:
+        raise RuntimeError(f"检测到多个 *-features 目录: {candidates}，请使用 --features-dir 指定其一。")
+    else:
+        raise RuntimeError(f"未在 {data_root} 下找到任何 *-features 目录，请检查目录结构或传入 --features-dir。")
+
+# 自动推断数据集名（如 Hands-features -> Hands, yalefaces-features -> yalefaces）
+dataset_name = os.path.basename(features_dir).replace('-features', '')
+
+# 原始图片目录
+if args.raw_dir:
+    hands_dir = args.raw_dir
+else:
+    # 常见命名兼容 Hands/Hands、yalefaces、等
+    raw_root = os.path.abspath(os.path.join(features_dir, '..', 'raw'))
+    hands_candidates = [
+        os.path.join(raw_root, dataset_name, dataset_name),
+        os.path.join(raw_root, dataset_name),
+        os.path.join(raw_root, 'Hands', 'Hands'),
+        os.path.join(raw_root, 'Hands'),
+    ]
+    hands_dir = next((d for d in hands_candidates if os.path.isdir(d)), None)
+    if not hands_dir:
+        raise RuntimeError(f'未找到原始图片目录，请通过 --raw-dir 指定，已尝试: {hands_candidates}')
+
+# 异常图片目录
+if args.anom_dir:
+    anom_dir = args.anom_dir
+else:
+    anom_candidates = [
+        os.path.join(raw_root, f'Anomalous_{dataset_name}'),
+        os.path.join(raw_root, 'Anomalous_Hands'),
+    ]
+    anom_dir = next((d for d in anom_candidates if os.path.isdir(d)), None)
+    if not anom_dir:
+        raise RuntimeError(f'未找到异常图片目录，请通过 --anom-dir 指定，已尝试: {anom_candidates}')
+
+# 结果保存目录
+if args.results_dir:
+    results_dir = args.results_dir
+else:
+    results_root = os.path.abspath(os.path.join(features_dir, '..', '..', 'results'))
+    results_dir = os.path.join(results_root, f'{dataset_name}-results')
+os.makedirs(results_dir, exist_ok=True)
+
+# embedding 路径
+normal_emb_path = os.path.join(features_dir, f'{prefix}_embedding.npy')
+anom_emb_path   = os.path.join(features_dir, f'anomalous_{prefix}_embedding.npy')
+
+# failed_images 路径
+default_fail_path = os.path.join(features_dir, 'failed_images.txt')
+prefix_fail_path = os.path.join(features_dir, f'failed_images_{prefix}.txt')
 fail_path = prefix_fail_path if os.path.exists(prefix_fail_path) else default_fail_path
 
-normal_emb_path = os.path.join(r'D:\Hand-DR-Project\data\features', f'{prefix}_embedding.npy')
-anom_emb_path   = os.path.join(r'D:\Hand-DR-Project\data\features', f'anomalous_{prefix}_embedding.npy')
-
 # 异常样本 failed 过滤清单（优先前缀，其次默认）
-anom_default_fail_path = r'D:\Hand-DR-Project\data\features\anomalous_failed_images.txt'
-anom_prefix_fail_path = os.path.join(r'D:\Hand-DR-Project\data\features', f'anomalous_failed_images_{prefix}.txt')
+anom_default_fail_path = os.path.join(features_dir, 'anomalous_failed_images.txt')
+anom_prefix_fail_path = os.path.join(features_dir, f'anomalous_failed_images_{prefix}.txt')
 anom_fail_path = anom_prefix_fail_path if os.path.exists(anom_prefix_fail_path) else anom_default_fail_path
 
 # 1. 读取 failed_images（可禁用，支持 per-prefix）
@@ -116,12 +180,12 @@ for i, (img, emb) in enumerate(zip(anom_images, anom_embedding)):
 
 # 合并并保存
 mapping_data = normal_mapping + anom_mapping
-os.makedirs(results_dir, exist_ok=True)
+
 mapping_filename = f"embedding_to_image_mapping_{prefix}.json"
 with open(os.path.join(results_dir, mapping_filename), "w", encoding="utf-8") as f:
     json.dump(mapping_data, f, indent=2, ensure_ascii=False)
 
-print(f"{mapping_filename} 已生成！共{len(mapping_data)}条。")
+print(f"{mapping_filename} 已生成！共{len(mapping_data)}条。保存于: {results_dir}")
 
 from collections import Counter
 

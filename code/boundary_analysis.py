@@ -11,12 +11,47 @@ from pathlib import Path
 import argparse
 
 # 参数化前缀
-parser = argparse.ArgumentParser(description='交互式边界分析可视化，支持多降维方法')
+
+parser = argparse.ArgumentParser(description='交互式边界分析可视化，支持多降维方法和多数据集')
 parser.add_argument('--prefix', type=str, default='TSNE', help='降维方法前缀，如 TSNE、NeuralTSNE、UMAP')
+parser.add_argument('--features-dir', type=str, default=None, help='features 目录（如 data/Hands-features），自动推断数据集名')
+parser.add_argument('--results-dir', type=str, default=None, help='结果保存目录（如 results/Hands-results），如未指定自动推断')
 parser.add_argument('--img-base', type=str, default=None, help='图片服务基地址，如 http://172.16.57.85:5678（file:// 环境下请不要使用 window.location）')
 args = parser.parse_args()
 prefix = args.prefix
-image_api_base = args.img_base if args.img_base else 'http://172.16.57.85:5678'
+# 默认本地服务器，避免生成 HTML 指向内网 IP
+image_api_base = args.img_base if args.img_base else 'http://localhost:5678'
+
+# 自动推断 features 目录：优先参数，其次自动在 data 下寻找唯一 *-features 目录
+if args.features_dir:
+    features_dir = os.path.abspath(args.features_dir)
+else:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    data_root = os.path.join(project_root, 'data')
+    candidates = []
+    if os.path.isdir(data_root):
+        for name in os.listdir(data_root):
+            p = os.path.join(data_root, name)
+            if os.path.isdir(p) and name.endswith('-features'):
+                candidates.append(p)
+    if len(candidates) == 1:
+        features_dir = os.path.abspath(candidates[0])
+        print(f"未指定 --features-dir，自动选择: {features_dir}")
+    elif len(candidates) > 1:
+        raise RuntimeError(f"检测到多个 *-features 目录: {candidates}，请使用 --features-dir 指定其一。")
+    else:
+        raise RuntimeError(f"未在 {data_root} 下找到任何 *-features 目录，请检查目录结构或传入 --features-dir。")
+
+# 自动推断数据集名（如 Hands-features -> Hands, yalefaces-features -> yalefaces）
+dataset_name = os.path.basename(features_dir).replace('-features', '')
+
+# 结果保存目录
+if args.results_dir:
+    RESULTS_DIR = args.results_dir
+else:
+    results_root = os.path.abspath(os.path.join(features_dir, '..', '..', 'results'))
+    RESULTS_DIR = os.path.join(results_root, f'{dataset_name}-results')
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # 全局K值设置
 K_NEIGHBORS = 100  # 修改此处即可全局生效
@@ -29,17 +64,14 @@ from tool_functions import wasserstein_loss
 
 print("成功导入wasserstein_loss函数")
 
-# 获取和code同级的results目录
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RESULTS_DIR = os.path.join(PROJECT_ROOT, 'results')
-os.makedirs(RESULTS_DIR, exist_ok=True)
+
 
 def load_and_normalize_data():
     print("加载并归一化数据...")
 
-    # 数据路径根据前缀自动切换
-    normal_embedding = np.load(os.path.join(PROJECT_ROOT, 'data', 'features', f'{prefix}_embedding.npy'))
-    anomalous_embedding = np.load(os.path.join(PROJECT_ROOT, 'data', 'features', f'anomalous_{prefix}_embedding.npy'))
+    # 数据路径根据前缀和 features_dir 自动切换
+    normal_embedding = np.load(os.path.join(features_dir, f'{prefix}_embedding.npy'))
+    anomalous_embedding = np.load(os.path.join(features_dir, f'anomalous_{prefix}_embedding.npy'))
 
     # 合并数据
     combined_embedding = np.vstack([normal_embedding, anomalous_embedding])
@@ -126,7 +158,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
         points_data.append(point_info)
 
     # 图片接口：使用参数 --img-base 指定，默认当前服务器 IP，兼容 file:// 方式
-    IMAGE_API_PATH = f"{image_api_base}/api/hand_thumb/{prefix}/"
+    IMAGE_API_BASE = f"{image_api_base}/api/hand_thumb/{prefix}"
 
     # 检查本地 plotly js 是否存在
     local_plotly_path = os.path.join(RESULTS_DIR, 'plotly-2.24.1.min.js')
@@ -541,7 +573,8 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 {json.dumps(boundary_indices.tolist())}
     </script>
     <script>
-    const IMAGE_API_URL = "{IMAGE_API_PATH}";
+    const IMAGE_API_BASE = "{IMAGE_API_BASE}";
+    const DATASET_NAME = "{dataset_name}";
         const pointsData = JSON.parse(document.getElementById('points-data').textContent);
         const boundaryIndices = JSON.parse(document.getElementById('boundary-indices').textContent);
         let plot = null;
@@ -685,11 +718,11 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 
             const imgElement = document.getElementById('preview-image');
             const caption = document.getElementById('image-caption');
-            const imgUrl = IMAGE_API_URL + point.index + `?t=${{Date.now()}}`; // 避免缓存
+            const imgUrl = IMAGE_API_BASE + '/' + point.index + '?dataset=' + encodeURIComponent(DATASET_NAME) + '&t=' + Date.now(); // 避免缓存
 
-            // 先设置占位文本并显示图片占位
-            caption.textContent = '正在加载图像…';
-            imgElement.style.display = 'block';
+            // 不显示“正在加载图像…”提示，也不在加载前展示占位图片
+            // 若需要，可在此保留上一张图片，直到新图加载完成
+            imgElement.style.display = 'none';
 
             // 绑定事件（每次重设，避免堆叠）
             imgElement.onload = function() {{
@@ -718,7 +751,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 if (point) {{
                     const imgDiv = document.createElement('div');
                     imgDiv.className = 'selected-image';
-                    const imgUrl = IMAGE_API_URL + point.index + `?t=${{Date.now()}}`;
+                    const imgUrl = IMAGE_API_BASE + '/' + point.index + '?dataset=' + encodeURIComponent(DATASET_NAME) + '&t=' + Date.now();
                     imgDiv.innerHTML = `
                         <div><strong>索引 ${{point.index}}</strong></div>
                         <img src="${{imgUrl}}" alt="手部图像 ${{point.index}}" style="max-width: 100px; max-height: 100px; cursor:pointer;" onerror="this.style.display='none'">
@@ -819,7 +852,7 @@ def visualize_results(normalized_embedding, labels, boundary_indices):
     plt.legend()
     plt.grid(True, alpha=0.3)
 
-    output_path = os.path.join(RESULTS_DIR, 'TSNE_analysis.png')
+    output_path = os.path.join(RESULTS_DIR, f'{prefix}_analysis.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"可视化图表已保存至: {output_path}")
     # 不弹出窗口

@@ -404,7 +404,8 @@
 [23, 24, 88, 89, 123, 212, 219, 220, 222, 223, 247, 248, 250, 251, 252, 253, 254, 255, 256, 265, 275, 286, 335, 369, 383, 384, 393, 573, 584, 614, 618, 620, 626, 633, 654, 655, 820, 821, 822, 823, 831, 832, 848, 865, 866, 869, 870, 891, 892, 911, 923, 924, 925, 926, 927, 929, 972, 975, 976, 1021, 1039, 1054, 1060, 1061, 1062, 1063, 1092, 1101, 1102, 1106, 1107, 1108, 1170, 1227, 1268, 1297, 1298, 1351, 1458, 1459, 1526, 1557, 1558, 1560, 1561, 2319, 2320, 2321, 2322, 2323, 2324, 2325, 2550, 2551, 2552, 2553, 2776, 2967, 2970, 2971, 2972, 2973, 2974, 2975, 2976, 2977, 2994, 3000, 3001, 3049, 3050, 3051, 3056, 3057, 3058, 3059, 3070, 3071, 3122, 3123, 3124, 3125, 3126, 3127, 3128, 3838, 3839, 3840, 3845, 3847, 4051, 4086, 4087, 4095, 4096, 4288, 4290, 4293, 4294, 4295, 4296, 4297, 4298, 4299, 4300, 4301, 4302, 4303, 4304, 4305, 4306, 4307, 4308, 4309, 4405, 4410, 4412, 4413, 4471, 4472, 4753, 4754, 4772, 5339, 5340, 5343, 5359, 5360, 5361, 5363, 5368, 5369, 5370, 5372, 5373, 5496, 5497, 5498, 5499, 5500, 5501, 5502, 5503, 5510, 5513, 5840, 5872, 5873, 5874, 5876, 5877, 5882, 6351, 6352, 6354, 6356, 6358, 6386, 6387, 6414, 6546, 6592, 6593, 6594, 6595, 6596, 6597, 6629, 6630, 6631, 6632, 6633, 6699, 6700, 6954, 6955, 6956, 6960, 6964, 6965, 6971, 6985, 6986, 6987, 6988, 6989, 6990, 6993, 6994, 7011, 7012, 7013, 7014, 7015, 7016, 7017, 7018, 7019, 7020, 7021, 7022, 7077, 7078, 7079, 7080, 7081, 7082, 7083, 7084, 7089, 7092, 7103, 7104, 7105, 7106, 7326, 7327, 7328, 7329, 7330, 7331, 7332, 7333, 7519, 7520, 7521, 7522, 7523, 7579, 7580, 7686, 7687, 7953, 7954, 7955, 7956, 7957, 7958, 8359, 8360, 8361, 8362, 8363, 8364, 8365, 8366, 8367, 8368, 8369, 8370, 8372, 9018, 9019, 9020, 9374, 9375, 9376, 9377, 9625, 9801, 9802, 9803, 9869, 9870, 9871, 9872, 9873, 9905, 9906, 9907, 9908, 9909, 10316, 10334, 10362, 10364, 10393, 10401, 10443]
     </script>
     <script>
-    const IMAGE_API_URL = "http://172.16.57.85:5678/api/hand_thumb/NeuralTSNE/";
+    const IMAGE_API_BASE = "http://localhost:5678/api/hand_thumb/NeuralTSNE";
+    const DATASET_NAME = "Hands";
         const pointsData = JSON.parse(document.getElementById('points-data').textContent);
         const boundaryIndices = JSON.parse(document.getElementById('boundary-indices').textContent);
         let plot = null;
@@ -548,11 +549,11 @@
 
             const imgElement = document.getElementById('preview-image');
             const caption = document.getElementById('image-caption');
-            const imgUrl = IMAGE_API_URL + point.index + `?t=${Date.now()}`; // 避免缓存
+            const imgUrl = IMAGE_API_BASE + '/' + point.index + '?dataset=' + encodeURIComponent(DATASET_NAME) + '&t=' + Date.now(); // 避免缓存
 
-            // 先设置占位文本并显示图片占位
-            caption.textContent = '正在加载图像…';
-            imgElement.style.display = 'block';
+            // 不显示“正在加载图像…”提示，也不在加载前展示占位图片
+            // 若需要，可在此保留上一张图片，直到新图加载完成
+            imgElement.style.display = 'none';
 
             // 绑定事件（每次重设，避免堆叠）
             imgElement.onload = function() {
@@ -581,7 +582,7 @@
                 if (point) {
                     const imgDiv = document.createElement('div');
                     imgDiv.className = 'selected-image';
-                    const imgUrl = IMAGE_API_URL + point.index + `?t=${Date.now()}`;
+                    const imgUrl = IMAGE_API_BASE + '/' + point.index + '?dataset=' + encodeURIComponent(DATASET_NAME) + '&t=' + Date.now();
                     imgDiv.innerHTML = `
                         <div><strong>索引 ${point.index}</strong></div>
                         <img src="${imgUrl}" alt="手部图像 ${point.index}" style="max-width: 100px; max-height: 100px; cursor:pointer;" onerror="this.style.display='none'">
