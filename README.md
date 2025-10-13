@@ -7,6 +7,10 @@
 
 当前已支持多种降维方法前缀（如 TSNE、NeuralTSNE、UMAP 等），每种方法可独立生成 mapping 和 HTML。
 
+先在D:\Hand-DR-Project\data\features中导入xxx_embedding.npy和anomalous_xxx_embedding.npy
+再运行make_embedding_mapping.py生成D:\Hand-DR-Project\results\embedding_to_image_mapping_xxx.json
+最后运行main.py
+
 ---
 
 ## 目录结构
