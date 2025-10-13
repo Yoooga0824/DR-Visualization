@@ -66,8 +66,11 @@ def get_hand_thumb(prefix, index):
     try:
         img = Image.open(img_path)
         img.thumbnail((200, 200))
+        # 为兼容 PNG 等模式（如 RGBA/P/LA），统一转换为可写 JPEG 的模式
+        if img.mode not in ('RGB', 'L'):
+            img = img.convert('RGB')
         buf = BytesIO()
-        img.save(buf, format='JPEG')
+        img.save(buf, format='JPEG', quality=85)
         buf.seek(0)
         return send_file(buf, mimetype='image/jpeg')
     except Exception as e:
