@@ -13,8 +13,10 @@ import argparse
 # 参数化前缀
 parser = argparse.ArgumentParser(description='交互式边界分析可视化，支持多降维方法')
 parser.add_argument('--prefix', type=str, default='TSNE', help='降维方法前缀，如 TSNE、NeuralTSNE、UMAP')
+parser.add_argument('--img-base', type=str, default=None, help='图片服务基地址，如 http://172.16.57.85:5678（file:// 环境下请不要使用 window.location）')
 args = parser.parse_args()
 prefix = args.prefix
+image_api_base = args.img_base if args.img_base else 'http://172.16.57.85:5678'
 
 # 全局K值设置
 K_NEIGHBORS = 100  # 修改此处即可全局生效
@@ -123,8 +125,8 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
         }
         points_data.append(point_info)
 
-    # 直接写死图片接口，兼容 file:// 方式
-    IMAGE_API_PATH = f"http://172.16.72.114:5678/api/hand_thumb/{prefix}/"
+    # 图片接口：使用参数 --img-base 指定，默认当前服务器 IP，兼容 file:// 方式
+    IMAGE_API_PATH = f"{image_api_base}/api/hand_thumb/{prefix}/"
 
     # 检查本地 plotly js 是否存在
     local_plotly_path = os.path.join(RESULTS_DIR, 'plotly-2.24.1.min.js')
