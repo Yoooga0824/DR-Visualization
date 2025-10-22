@@ -61,6 +61,22 @@ def get_hand_thumb(prefix, index):
         pass
     print(f"Trying to access: {img_path}")
     if not os.path.exists(img_path):
+        # 兼容Hands目录从 raw/Hands/Hands 调整到 raw/Hands 的历史映射
+        try:
+            norm = os.path.normpath(img_path)
+            legacy = os.path.normpath(os.path.join('data', 'raw', 'Hands', 'Hands'))
+            newer  = os.path.normpath(os.path.join('data', 'raw', 'Hands'))
+            if legacy in norm:
+                alt = norm.replace(legacy, newer)
+                # 将相对替换结果恢复为绝对路径（相对仓库根）
+                repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+                # 如果 alt 是绝对路径，直接使用；否则拼到仓库根
+                alt_path = alt if os.path.isabs(alt) else os.path.normpath(os.path.join(repo_root, alt))
+                if os.path.exists(alt_path):
+                    img_path = alt_path
+        except Exception:
+            pass
+    if not os.path.exists(img_path):
         print("Image not found!")
         abort(404)
     try:

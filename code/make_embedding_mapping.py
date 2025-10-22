@@ -38,19 +38,72 @@ def choose_from_list(title: str, options: list, allow_multi: bool = False, defau
 
 
 def infer_raw_dirs(features_dir: str, dataset_name: str):
+    """
+    根据已选数据集，仅返回该数据集相关的原始/异常目录候选；
+    - normal:   raw/{dataset} 或 raw/{dataset}/{dataset}
+    - anomalous:raw/Anomalous_{dataset}
+    - Hands 数据集兼容旧结构 raw/Hands/Hands
+    若未找到，则在 raw 根目录下做一次轻量模糊匹配（名称包含 dataset，且区分 anomalous 与非 anomalous）。
+    """
     raw_root = os.path.abspath(os.path.join(features_dir, '..', 'raw'))
+    ds = dataset_name
+    ds_lower = ds.lower()
+
     normal_candidates = [
-        os.path.join(raw_root, dataset_name, dataset_name),
-        os.path.join(raw_root, dataset_name),
-        os.path.join(raw_root, 'Hands', 'Hands'),
-        os.path.join(raw_root, 'Hands'),
+        os.path.join(raw_root, ds, ds),
+        os.path.join(raw_root, ds),
     ]
+    # Hands 的历史结构向后兼容
+    if ds_lower == 'hands':
+        normal_candidates += [
+            os.path.join(raw_root, 'Hands', 'Hands'),
+            os.path.join(raw_root, 'Hands'),
+        ]
+
     anom_candidates = [
-        os.path.join(raw_root, f'Anomalous_{dataset_name}'),
-        os.path.join(raw_root, 'Anomalous_Hands'),
+        os.path.join(raw_root, f'Anomalous_{ds}'),
     ]
+
+    # 先过滤存在路径
     normal_candidates = [d for d in normal_candidates if os.path.isdir(d)]
     anom_candidates = [d for d in anom_candidates if os.path.isdir(d)]
+
+    # 若为空，进行一次根目录下的模糊兜底：
+    # - normal: 目录名包含 dataset 且不包含 anomalous
+    # - anomalous: 目录名同时包含 anomalous 与 dataset
+    try:
+        if not normal_candidates and os.path.isdir(raw_root):
+            for name in os.listdir(raw_root):
+                p = os.path.join(raw_root, name)
+                if not os.path.isdir(p):
+                    continue
+                name_lower = name.lower()
+                if ds_lower in name_lower and 'anomalous' not in name_lower:
+                    normal_candidates.append(p)
+        if not anom_candidates and os.path.isdir(raw_root):
+            for name in os.listdir(raw_root):
+                p = os.path.join(raw_root, name)
+                if not os.path.isdir(p):
+                    continue
+                name_lower = name.lower()
+                if 'anomalous' in name_lower and ds_lower in name_lower:
+                    anom_candidates.append(p)
+    except Exception:
+        # 忽略扫描异常，保持空列表以便后续提示用户手动输入
+        pass
+
+    def unique_paths(paths: list) -> list:
+        seen = set()
+        out = []
+        for p in paths:
+            key = os.path.normcase(os.path.normpath(p))
+            if key not in seen:
+                seen.add(key)
+                out.append(p)
+        return out
+
+    normal_candidates = unique_paths(normal_candidates)
+    anom_candidates = unique_paths(anom_candidates)
     return raw_root, normal_candidates, anom_candidates
 
 
@@ -232,7 +285,7 @@ def main():
     parser = argparse.ArgumentParser(description='生成 embedding_to_image_mapping.json，支持多降维方法和多数据集（缺省进入交互式选择）')
     parser.add_argument('--prefix', type=str, help='降维方法前缀，如 TSNE、NeuralTSNE、UMAP；支持多个用逗号分隔')
     parser.add_argument('--features-dir', type=str, default=None, help='features 目录（如 data/Hands-features），自动/交互推断')
-    parser.add_argument('--raw-dir', type=str, default=None, help='原始图片目录（如 data/raw/Hands/Hands）')
+    parser.add_argument('--raw-dir', type=str, default=None, help='原始图片目录（例如 Hands: data/raw/Hands；兼容旧结构 data/raw/Hands/Hands）')
     parser.add_argument('--anom-dir', type=str, default=None, help='异常图片目录（如 data/raw/Anomalous_Hands 或 data/raw/Anomalous_yalefaces）')
     parser.add_argument('--results-dir', type=str, default=None, help='结果保存目录（如 results/Hands-results）')
     parser.add_argument('--no-filter', action='store_true', help='不使用 failed_images 过滤（同时影响正常与异常样本）')
