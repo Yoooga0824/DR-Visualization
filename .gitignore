@@ -1,1 +1,24 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+
+# Data: do not version large/raw datasets
 data/raw/
+
+# Feature arrays and large numpy artifacts
+data/*-features/*.npy
+data/*-features/*.npz
+data/*-features/*_embedding.npy
+data/*-features/anomalous_*_embedding.npy
+data/mnist-features/*.npy
+
+# Keep small text configs in features
+!data/*-features/*.txt
+
+# Virtual environments
+.venv/
+venv/

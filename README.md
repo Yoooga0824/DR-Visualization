@@ -1,6 +1,6 @@
 # DR-Visualization 使用说明（中文）
 
-一个用于图像降维可视化与边界分析的小型工作流（当前含 Hands、yalefaces 两套数据），包括：
+一个用于图像降维可视化与边界分析的小型工作流（当前含 Hands、yalefaces、mnist 三套数据），包括：
 - 生成 embedding 与原始图像的一一映射（mapping）
 - 启动图片服务，供前端 HTML 以 index 取缩略图
 - 生成可交互的 HTML（支持本地 file:// 直接打开）
@@ -30,8 +30,10 @@ DR-Visualization/
 │  │  ├─ Hands/                   # Hands 正常样本图片目录（Hand_*.jpg，历史也支持 Hands/Hands/）
 │  │  ├─ Anomalous_Hands/         # Hands 异常样本图片目录（*.jpg）
 │  │  ├─ yalefaces/               # yalefaces 正常样本图片目录（*.png）
-│  │  └─ Anomalous_yalefaces/     # yalefaces 异常样本图片目录（*.png）
-│  ├─ Hands-features/ 或 yalefaces-features/
+│  │  ├─ Anomalous_yalefaces/     # yalefaces 异常样本图片目录（*.png）
+│  │  ├─ mnist/                   # mnist 正常样本图片目录（*.png，反向生成 <index>.png）
+│  │  └─ Anomalous_mnist/         # mnist 异常样本图片目录（*.png，反向生成 <index>.png）
+│  ├─ Hands-features/ 或 yalefaces-features/ 或 mnist-features/
 │  │  ├─ <prefix>_embedding.npy               # 正常样本降维向量
 │  │  ├─ anomalous_<prefix>_embedding.npy     # 异常样本降维向量
 │  │  ├─ failed_images.txt                    # 正常样本默认过滤清单（可选）
@@ -68,6 +70,8 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
 - yalefaces：
   - 正常样本在 `data/raw/yalefaces/`（扩展名为 `.png`）
   - 异常样本在 `data/raw/Anomalous_yalefaces/`（`.png`）
+- mnist：
+  - 若你只有 `data/mnist-features/*.npy` 而没有原始图像，可先用 `code/translate_npy_to_image.py` 反向生成原图到 `data/raw/mnist` 与 `data/raw/Anomalous_mnist`（见下文“MNIST 指南”）。
 - 将降维结果放入 `data/*-features/`：
   - 正常：`<prefix>_embedding.npy`
   - 异常：`anomalous_<prefix>_embedding.npy`
@@ -92,10 +96,38 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
 
 ---
 
+## MNIST 指南：从 .npy 反向生成原始图像
+
+当你只有 `data/mnist-features/mnist_features.npy` 和 `data/mnist-features/anomalous_mnist_features.npy` 时，可使用脚本将扁平化的 28x28 灰度向量还原为图像。
+
+1) 生成原始图像到 `data/raw/mnist` 与 `data/raw/Anomalous_mnist`（保持与 .npy 行索引一一对应）：
+
+```powershell
+py D:\DR-Visualization\code\translate_npy_to_image.py `
+  --dataset mnist `
+  --normal-npy D:\DR-Visualization\data\mnist-features\mnist_features.npy `
+  --anom-npy   D:\DR-Visualization\data\mnist-features\anomalous_mnist_features.npy
+```
+
+- 脚本会输出 `<index>.png`，索引与 .npy 的行号一致，确保后续映射严格对齐。
+- 如果你的 .npy 内部是字典对象，脚本会自动从 `['data']` 键取出 (N,784) 的矩阵。
+
+2) 生成映射与 HTML（以 TSNE 为例）：
+
+```powershell
+py D:\DR-Visualization\code\make_embedding_mapping.py --prefix TSNE --features-dir D:\DR-Visualization\data\mnist-features
+py D:\DR-Visualization\code\boundary_analysis.py --prefix TSNE --features-dir D:\DR-Visualization\data\mnist-features --img-base http://localhost:5678
+```
+
+- 映射脚本会自动检测 `*.png` 并仅展示 mnist 相关的原始/异常目录候选；唯一候选会自动选择。
+- 生成的 HTML 与 Hands/yalefaces 一样，可以直接打开查看。
+
+---
+
 ## 批量处理（推荐）
 
 - 入口：`code/main.py`
-- 支持交互式按“数据集 → 方法”逐步选择，或通过 `--prefix` 只处理某一方法：
+- 支持交互式按“数据集 → 方法”逐步选择（现支持 Hands、yalefaces、mnist），或通过 `--prefix` 只处理某一方法：
   - `py code/main.py`（交互式多选/全选）
   - `py code/main.py --prefix NeuralTSNE`（仅处理指定方法）
 - 对每个选择的方法，依次执行：生成 mapping → 生成 HTML。
@@ -177,8 +209,7 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
   - `failed_images.txt`、`failed_images_<prefix>.txt`
   - `anomalous_failed_images.txt`、`anomalous_failed_images_<prefix>.txt`
 - 运行 `py code/main.py`，选择新数据集与方法，即可自动完成映射与 HTML 生成；脚本会自动检测图片扩展名与默认匹配模式（如 `*.png`）。
-- 直接重新生成该方法的 HTML（`boundary_analysis.py --prefix <prefix>`）
-- 确保 `results/embedding_to_image_mapping_<prefix>.json` 与 HTML 的前缀一致且未被覆盖
+- 若只有 features 的 .npy 而无原始图像，可先使用 `code/translate_npy_to_image.py` 将扁平向量还原为 `<index>.png`，保证与 embedding 行序自然排序一致。
 
 ---
 
