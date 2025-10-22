@@ -1,6 +1,6 @@
 # DR-Visualization 使用说明（中文）
 
-一个用于手部图像降维可视化与边界分析的小型工作流，包括：
+一个用于图像降维可视化与边界分析的小型工作流（当前含 Hands、yalefaces 两套数据），包括：
 - 生成 embedding 与原始图像的一一映射（mapping）
 - 启动图片服务，供前端 HTML 以 index 取缩略图
 - 生成可交互的 HTML（支持本地 file:// 直接打开）
@@ -13,7 +13,7 @@
 
 ---
 
-## 目录结构
+## 目录结构（最新）
 
 ```
 DR-Visualization/
@@ -21,14 +21,16 @@ DR-Visualization/
 │  ├─ main.py                     # 批量入口（交互选择方法或指定 --prefix）
 │  ├─ make_embedding_mapping.py   # 生成映射 JSON（embedding ↔ 图片）
 │  ├─ boundary_analysis.py        # 生成交互式 HTML（含边界检测与指标）
-│  ├─ image_server.py             # Flask 图片缩略图服务（/api/hand_thumb/<prefix>/<index>?dataset=<dataset>）
+│  ├─ image_server.py             # Flask 图片缩略图服务（/api/hand_thumb/<prefix>/<index>?dataset=<dataset>，自动 RGB 转换）
 │  ├─ tool_functions.py           # 工具函数（含 wasserstein_loss）
 │  └─ detection/BDLLE.py          # 边界检测算法（BD-LLE）
 │
 ├─ data/
 │  ├─ raw/
-│  │  ├─ Hands/Hands/             # 正常样本图片目录（Hand_*.jpg）
-│  │  └─ Anomalous_Hands/         # 异常样本图片目录（*.jpg）
+│  │  ├─ Hands/                   # Hands 正常样本图片目录（Hand_*.jpg，历史也支持 Hands/Hands/）
+│  │  ├─ Anomalous_Hands/         # Hands 异常样本图片目录（*.jpg）
+│  │  ├─ yalefaces/               # yalefaces 正常样本图片目录（*.png）
+│  │  └─ Anomalous_yalefaces/     # yalefaces 异常样本图片目录（*.png）
 │  ├─ Hands-features/ 或 yalefaces-features/
 │  │  ├─ <prefix>_embedding.npy               # 正常样本降维向量
 │  │  ├─ anomalous_<prefix>_embedding.npy     # 异常样本降维向量
@@ -50,7 +52,7 @@ DR-Visualization/
 建议 Python 3.9+。需要安装的主要第三方库：
 - numpy, matplotlib, scipy, tqdm
 - torch（用于 wasserstein 距离计算）
-- Pillow（PIL）
+- Pillow（PIL，服务端会对非 RGB 图像自动转换为 RGB 再编码为 JPEG）
 - Flask, flask-cors（图片服务）
 
 Plotly 通过 CDN 加载，HTML 本地打开即可。
@@ -60,24 +62,29 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
 ## 快速开始
 
 1) 准备数据
-- 将正常样本在 `data/raw/Hands/Hands/`，命名形如 `Hand_*.jpg`
-- 将异常样本在 `data/raw/Anomalous_Hands/`
+- Hands：
+  - 正常样本在 `data/raw/Hands/`（兼容历史 `data/raw/Hands/Hands/`），命名形如 `Hand_*.jpg`
+  - 异常样本在 `data/raw/Anomalous_Hands/`
+- yalefaces：
+  - 正常样本在 `data/raw/yalefaces/`（扩展名为 `.png`）
+  - 异常样本在 `data/raw/Anomalous_yalefaces/`（`.png`）
 - 将降维结果放入 `data/*-features/`：
   - 正常：`<prefix>_embedding.npy`
   - 异常：`anomalous_<prefix>_embedding.npy`
 
 2) 生成映射（mapping）
-- 单方法：运行 `code/make_embedding_mapping.py`，示例：
-  - `python code/make_embedding_mapping.py --prefix TSNE`
+- 单方法：运行 `code/make_embedding_mapping.py`，示例（Windows 推荐使用 `py`）：
+  - `py code/make_embedding_mapping.py --prefix TSNE`
   - 可选：`--no-filter` 关闭正常与异常的 failed 过滤
   - 可选：`--anom-list D:\path\to\anom_list.txt` 精确指定异常图片集合与顺序（跳过异常 failed 过滤）
+  - 交互改进：选择数据集后，脚本只会展示该数据集相关的原始/异常目录；若唯一可选则自动选择。并会自动检测图片扩展名（如 yalefaces 为 *.png），提供合适的默认匹配规则；默认采用“自然排序”对齐文件名与 embedding 顺序。
 
 3) 启动图片服务（建议先启动）
-- `python code/image_server.py`
+- `py code/image_server.py`
 - 服务默认监听 `0.0.0.0:5678`，接口：`/api/hand_thumb/<prefix>/<index>?dataset=<dataset>`（dataset 可选，但建议带上以精确匹配映射文件所在数据集）
 
 4) 生成交互式 HTML
-- `python code/boundary_analysis.py --prefix TSNE --features-dir data/Hands-features`
+- `py code/boundary_analysis.py --prefix TSNE --features-dir data/Hands-features`
 - 生成 `results/Hands-results/TSNE.html`，可直接双击用浏览器打开（file:// 方式）
 
 5) 打开页面
@@ -88,9 +95,9 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
 ## 批量处理（推荐）
 
 - 入口：`code/main.py`
-- 支持交互式选择方法或通过 `--prefix` 只处理某一方法：
-  - `python code/main.py`（交互式多选/全选）
-  - `python code/main.py --prefix NeuralTSNE`（仅处理指定方法）
+- 支持交互式按“数据集 → 方法”逐步选择，或通过 `--prefix` 只处理某一方法：
+  - `py code/main.py`（交互式多选/全选）
+  - `py code/main.py --prefix NeuralTSNE`（仅处理指定方法）
 - 对每个选择的方法，依次执行：生成 mapping → 生成 HTML。
 
 ---
@@ -123,19 +130,20 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
     - `features`：预留字段
 
 - 图片接口：`/api/hand_thumb/<prefix>/<index>?dataset=<dataset>`
-  - 由 `code/image_server.py` 提供，会读取对应 `results/<dataset>-results/embedding_to_image_mapping_<prefix>.json`，根据 index 找到图片并返回一个 200x200 的 JPEG 缩略图；
-  - 若省略 `dataset` 参数，服务会在 `results/` 递归搜索匹配的映射文件；若历史 JSON 中包含旧绝对路径（如 D:\\Hand-DR-Project），服务会尝试在运行时自动修复到当前仓库的 `data/` 目录。
+  - 由 `code/image_server.py` 提供：读取 `results/<dataset>-results/embedding_to_image_mapping_<prefix>.json`，按 index 找到图片并返回 200x200 的 JPEG 缩略图；
+  - 自动兼容 PNG/JPG：若源图非 RGB（如 PNG 的 L/LA 模式），会自动转换为 RGB 再编码为 JPEG 输出；
+  - 若省略 `dataset` 参数，服务会在 `results/` 递归搜索匹配的映射文件；若历史 JSON 中包含旧绝对路径（如 D:\Hand-DR-Project 或旧 Hands/Hands 结构），服务会尝试在运行时自动修复到当前仓库的 `data/` 目录。
 
 ---
 
 ## HTML 图片显示与 IP 设置
 
-- 生成的 HTML 中，图片接口 URL 为写死的绝对地址，示例：
-  - `http://<你的机器IP>:5678/api/hand_thumb/<prefix>/?dataset=<dataset>`（末尾再拼上索引）
+- 生成的 HTML 中，图片接口 URL 形如：
+  - `http://<你的机器IP>:5678/api/hand_thumb/<prefix>/<index>?dataset=<dataset>&t=<timestamp>`
 - 请确保：
   1. `image_server.py` 已在该 IP:5678 上运行
   2. 防火墙允许 5678 端口访问（内网环境）
-    3. 如果你的机器 IP 不是代码里写死的值，请修改 `code/boundary_analysis.py` 中的 `IMAGE_API_PATH`，或重新生成 HTML。`boundary_analysis.py` 已默认在生成的 URL 中附加 `?dataset=<dataset>`，并会在点击时追加时间戳 `t=...` 作为缓存清理参数。
+  3. 如果你的机器 IP 不是代码里写死的值，请修改 `code/boundary_analysis.py` 的 `IMAGE_API_BASE`（或通过命令行 `--img-base`），再重新生成 HTML。该脚本会自动附加 `?dataset=<dataset>` 并在点击时追加时间戳 `t=...` 作为缓存清理参数。
 
 ---
 
@@ -151,6 +159,24 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
 - 异常侧：建议提供 `--anom-list` 精确指定集合与顺序（或检查 `anomalous_failed_images_*` 清单）
 
 3) 圈选/点击无响应或报错
+4) 交互时出现了其它数据集的目录选项
+- 现在脚本会在选择数据集后仅展示该数据集相关目录；若你看到跨数据集选项，可能是你手动指定了 `--raw-dir` 或 `--anom-dir`。清除这些参数后重试；若该数据集的目录不存在，脚本会提示你手动输入路径。
+
+---
+
+## 新增数据集的约定（通用）
+
+- 目录命名：
+  - features：`data/<dataset>-features/`
+  - 原始图片：`data/raw/<dataset>/`
+  - 异常图片：`data/raw/Anomalous_<dataset>/`
+- 必备文件：
+  - `data/<dataset>-features/<prefix>_embedding.npy`
+  - `data/<dataset>-features/anomalous_<prefix>_embedding.npy`
+- 可选文件：
+  - `failed_images.txt`、`failed_images_<prefix>.txt`
+  - `anomalous_failed_images.txt`、`anomalous_failed_images_<prefix>.txt`
+- 运行 `py code/main.py`，选择新数据集与方法，即可自动完成映射与 HTML 生成；脚本会自动检测图片扩展名与默认匹配模式（如 `*.png`）。
 - 直接重新生成该方法的 HTML（`boundary_analysis.py --prefix <prefix>`）
 - 确保 `results/embedding_to_image_mapping_<prefix>.json` 与 HTML 的前缀一致且未被覆盖
 
@@ -178,4 +204,4 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
 ## 备注
 
 - 本项目主要在 Windows 环境下开发与测试。
-- 已移除硬编码的旧路径“D:\\Hand-DR-Project”，若历史结果 JSON 中仍含有旧盘符，图片服务会在运行时尝试自动回退修复为当前仓库下的 data 目录。
+- 已移除硬编码的旧路径“D:\\Hand-DR-Project”，若历史结果 JSON 中仍含有旧盘符或旧 Hands 目录结构，图片服务会在运行时尝试自动回退修复为当前仓库下的 data 目录。
