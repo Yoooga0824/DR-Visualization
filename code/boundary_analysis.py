@@ -628,9 +628,9 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 hovermode: 'closest',
                 showlegend: false,
                 height: 600,
-                plot_bgcolor: '#fafafa',
+                plot_bgcolor: '#fafafa',                py code\\main.py
                 paper_bgcolor: '#ffffff',
-                dragmode: 'zoom'  // 默认缩放模式
+                dragmode: 'pan'  // 默认平移模式（由原先的 'zoom' 修改）
             }};
             const config = {{ responsive: true, displayModeBar: true, displaylogo: false, modeBarButtonsToAdd: ['toggleHover', 'resetViews'], scrollZoom: true }};
             plot = Plotly.newPlot('plotly-chart', [traceNormal, traceAnomalous, traceBoundary], layout, config);
