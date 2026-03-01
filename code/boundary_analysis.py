@@ -681,11 +681,11 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 }}
             }};
             const clearDirLineButton = {{
-                name: 'Clear Line',
-                title: '清除有向线与排序结果',
+                name: 'Reset View',
+                title: '重置视图',
                 icon: eraseIcon,
                 click: function(gd) {{
-                    clearDirectedLine(gd);
+                    resetView();
                 }}
             }};
 
