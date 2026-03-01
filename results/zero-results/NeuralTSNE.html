@@ -391,6 +391,18 @@
                     </div>
                 </div>
                 <div class="controls">
+                    <div id="dirline-tol-controls" style="display:none; margin-bottom:8px;">
+                        <div style="display:flex; flex-direction:column; gap:6px;">
+                            <div style="display:flex; align-items:center; justify-content:space-between;">
+                                <span style="font-size:0.9rem;color:#5a6d8a;">有向线宽度</span>
+                                <span id="dirline-tol-label" style="font-size:0.9rem;color:#5a6d8a;">0.020</span>
+                            </div>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <input id="dirline-tol-range" type="range" min="0.001" max="0.1" step="0.001" value="0.02" style="flex:1;">
+                                <input id="dirline-tol-number" type="number" min="0.001" max="0.1" step="0.001" value="0.02" style="width:86px;">
+                            </div>
+                        </div>
+                    </div>
                     <button class="btn" onclick="zoomToBoundary()">缩放至边界点</button>
                     <button class="btn" onclick="resetView()">重置视图</button>
                 </div>
@@ -414,12 +426,82 @@
         let currentDragMode = 'pan'; // 默认平移模式
 
         // 有向线功能：画线（x0,y0）->（x1,y1），按方向投影排序后显示图像
-        let directedLine = null; // {x0, y0, x1, y1}
+        let directedLine = null; // x0,y0 -> x1,y1
         let directedLineActive = false;
         let directedLineTol = 0.02; // 距离阈值（坐标已归一化到[0,1]）
-        let directedLineMax = 120;  // 最多展示点数（避免一次性加载过多图片）
+        let directedLineMax = 1000;  // 最多展示点数（避免一次性加载过多图片）
         let directedLineOnlySegment = true; // 仅统计线段范围内的点（t∈[0,1]）
         let isApplyingDirectedLineRelayout = false; // 防止 relayout 递归
+        let directedLineTolUIEnabled = false;
+
+        const DIRECTED_LINE_TOL_MIN = 0.001;
+        const DIRECTED_LINE_TOL_MAX = 0.1;
+        const DIRECTED_LINE_TOL_STEP = 0.001;
+
+        function clampDirectedLineTol(v) {
+            const num = Number(v);
+            if (!isFinite(num)) return directedLineTol;
+            return Math.min(DIRECTED_LINE_TOL_MAX, Math.max(DIRECTED_LINE_TOL_MIN, num));
+        }
+
+        function formatDirectedLineTol(v) {
+            const num = Number(v);
+            if (!isFinite(num)) return String(v);
+            return num.toFixed(3);
+        }
+
+        function setDirectedLineTol(nextTol, opts = {}) {
+            if (!directedLineTolUIEnabled && !opts.force) {
+                return;
+            }
+            const tol = clampDirectedLineTol(nextTol);
+            directedLineTol = tol;
+
+            const rangeEl = document.getElementById('dirline-tol-range');
+            const numberEl = document.getElementById('dirline-tol-number');
+            const labelEl = document.getElementById('dirline-tol-label');
+            if (rangeEl && !opts.skipRange) rangeEl.value = String(tol);
+            if (numberEl && !opts.skipNumber) numberEl.value = String(tol);
+            if (labelEl) labelEl.textContent = formatDirectedLineTol(tol);
+
+            const gd = document.getElementById('plotly-chart');
+            if (directedLine && gd && gd.data) {
+                applyDirectedLineSelection(gd, directedLine);
+            }
+        }
+
+        function setDirectedLineTolUIActive(active) {
+            directedLineTolUIEnabled = Boolean(active);
+            const container = document.getElementById('dirline-tol-controls');
+            if (container) {
+                container.style.display = directedLineTolUIEnabled ? 'block' : 'none';
+            }
+        }
+
+        function initDirectedLineTolUI() {
+            const rangeEl = document.getElementById('dirline-tol-range');
+            const numberEl = document.getElementById('dirline-tol-number');
+
+            if (rangeEl) {
+                rangeEl.min = String(DIRECTED_LINE_TOL_MIN);
+                rangeEl.max = String(DIRECTED_LINE_TOL_MAX);
+                rangeEl.step = String(DIRECTED_LINE_TOL_STEP);
+                rangeEl.addEventListener('input', function(e) {
+                    setDirectedLineTol(e.target.value, { skipRange: true });
+                });
+            }
+            if (numberEl) {
+                numberEl.min = String(DIRECTED_LINE_TOL_MIN);
+                numberEl.max = String(DIRECTED_LINE_TOL_MAX);
+                numberEl.step = String(DIRECTED_LINE_TOL_STEP);
+                numberEl.addEventListener('change', function(e) {
+                    setDirectedLineTol(e.target.value, { skipNumber: true });
+                });
+            }
+            // 默认隐藏，仅点击“Dir Line”后才启用
+            setDirectedLineTolUIActive(false);
+            setDirectedLineTol(directedLineTol, { force: true });
+        }
 
         // trace 内点位索引映射：global index -> point position in that trace
         let traceIndexToPos = {
@@ -579,6 +661,11 @@
                 if (eventData && eventData['dragmode']) {
                     const prevDragMode = currentDragMode;
                     currentDragMode = eventData['dragmode'];
+                    // 切换到其它工具（如 Pan/Zoom/Select/Lasso）时，隐藏并禁用宽度滑块
+                    if (currentDragMode !== 'drawline') {
+                        setDirectedLineTolUIActive(false);
+                        directedLineActive = false;
+                    }
                     const wasSelect = (prevDragMode === 'lasso' || prevDragMode === 'select');
                     const isSelect = (currentDragMode === 'lasso' || currentDragMode === 'select');
                     // 仅当“退出”圈选/套索时才清空 UI，避免切换到 drawline 时误清空提示信息
@@ -604,6 +691,7 @@
         function activateDirectedLine(gd) {
             directedLineActive = true;
             currentDragMode = 'drawline';
+            setDirectedLineTolUIActive(true);
             document.getElementById('selected-images-content').innerHTML =
                 '<p>有向线模式：在图上拖拽画一条线（起点 → 终点），将按方向依次显示命中点的图像。</p>';
             Plotly.relayout(gd, {'dragmode': 'drawline'});
@@ -734,7 +822,7 @@
                 <p><strong>有向线命中 ${hits.length} 个点</strong>（从起点 → 终点）</p>
                 <p style="color:#5a6d8a;font-size:0.88rem; margin-top:6px;">
                     起点(${line.x0.toFixed(3)}, ${line.y0.toFixed(3)}) → 终点(${line.x1.toFixed(3)}, ${line.y1.toFixed(3)})
-                    · 距离阈值=${directedLineTol} · 最大展示=${directedLineMax}
+                    · 距离阈值=${directedLineTol} · 最大展示=${directedLineMax}（避免一次展示过多）
                 </p>
             `;
             selectedImagesContent.appendChild(header);
@@ -865,6 +953,7 @@
         function resetView() {
             directedLine = null;
             directedLineActive = false;
+            setDirectedLineTolUIActive(false);
             isApplyingDirectedLineRelayout = true;
             Plotly.relayout('plotly-chart', {
                 'xaxis.range': [0, 1],
@@ -899,6 +988,7 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            initDirectedLineTolUI();
             initPlot();
         });
     </script>

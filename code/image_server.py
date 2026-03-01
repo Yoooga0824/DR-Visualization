@@ -5,9 +5,37 @@ from PIL import Image
 from io import BytesIO
 import json
 from pathlib import Path
+import threading
+from typing import Any, Dict, Tuple
 
 app = Flask(__name__)
 CORS(app)
+
+# Simple in-memory caches to reduce per-request overhead.
+# - Mapping JSON was previously read from disk for every image request.
+# - With many thumbnails (e.g. 1000), this becomes a bottleneck.
+_MAPPING_CACHE_LOCK = threading.Lock()
+_MAPPING_CACHE: Dict[str, Tuple[float, Any]] = {}
+
+
+def _load_mapping_cached(mapping_path: str):
+    try:
+        mtime = os.path.getmtime(mapping_path)
+    except OSError:
+        return None
+
+    with _MAPPING_CACHE_LOCK:
+        cached = _MAPPING_CACHE.get(mapping_path)
+        if cached and cached[0] == mtime:
+            return cached[1]
+
+    with open(mapping_path, 'r', encoding='utf-8') as f:
+        mapping_data = json.load(f)
+
+    with _MAPPING_CACHE_LOCK:
+        _MAPPING_CACHE[mapping_path] = (mtime, mapping_data)
+
+    return mapping_data
 
 
 @app.route('/api/hand_thumb/<prefix>/<int:index>')
@@ -38,8 +66,10 @@ def get_hand_thumb(prefix, index):
     if not mapping_path:
         print(f"Mapping file not found for prefix {prefix}, tried: {mapping_candidates}")
         abort(404)
-    with open(mapping_path, 'r', encoding='utf-8') as f:
-        mapping_data = json.load(f)
+
+    mapping_data = _load_mapping_cached(mapping_path)
+    if mapping_data is None:
+        abort(404)
     if index < 0 or index >= len(mapping_data):
         abort(404)
     img_path = mapping_data[index]['image_path']
@@ -106,4 +136,9 @@ def index():
     return 'Image server is running!'
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5678, debug=True)
+    # NOTE:
+    # - Single-threaded dev server can create a "queue" effect when the client requests many images.
+    # - Enabling threaded mode allows requests to be served concurrently so newer selections don't
+    #   have to wait for older thumbnail requests to drain.
+    debug = os.environ.get('IMAGE_SERVER_DEBUG', '').strip() in ('1', 'true', 'True')
+    app.run(host='0.0.0.0', port=5678, debug=debug, threaded=True, use_reloader=debug)
