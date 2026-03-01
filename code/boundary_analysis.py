@@ -580,12 +580,32 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
         let plot = null;
         let currentPointIndex = null;
         let selectedPoints = [];
-        let currentDragMode = 'zoom'; // 默认缩放模式
+        let currentDragMode = 'pan'; // 默认平移模式
+
+        // 有向线功能：画线（x0,y0）->（x1,y1），按方向投影排序后显示图像
+        let directedLine = null; // {x0, y0, x1, y1}
+        let directedLineActive = false;
+        let directedLineTol = 0.02; // 距离阈值（坐标已归一化到[0,1]）
+        let directedLineMax = 120;  // 最多展示点数（避免一次性加载过多图片）
+        let directedLineOnlySegment = true; // 仅统计线段范围内的点（t∈[0,1]）
+        let isApplyingDirectedLineRelayout = false; // 防止 relayout 递归
+
+        // trace 内点位索引映射：global index -> point position in that trace
+        let traceIndexToPos = {{
+            normal: new Map(),
+            anomalous: new Map(),
+            boundary: new Map()
+        }};
 
         function initPlot() {{
             const normalPoints = pointsData.filter(p => p.cluster === 'normal' && !p.is_boundary);
             const anomalousPoints = pointsData.filter(p => p.cluster === 'anomalous' && !p.is_boundary);
             const boundaryPoints = pointsData.filter(p => p.is_boundary);
+
+            // 为后续高亮/筛选建立索引映射
+            traceIndexToPos.normal = new Map(normalPoints.map((p, i) => [Number(p.index), i]));
+            traceIndexToPos.anomalous = new Map(anomalousPoints.map((p, i) => [Number(p.index), i]));
+            traceIndexToPos.boundary = new Map(boundaryPoints.map((p, i) => [Number(p.index), i]));
 
             const traceNormal = {{
                 x: normalPoints.map(p => p.x),
@@ -594,6 +614,8 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 type: 'scatter',
                 name: '正常手部图像',
                 marker: {{ color: 'lightblue', size: 6, opacity: 0.7 }},
+                selected: {{ marker: {{ opacity: 1.0 }} }},
+                unselected: {{ marker: {{ opacity: 0.12 }} }},
                 text: normalPoints.map(p => `索引: ${{p.index}}<br>类型: 正常`),
                 hoverinfo: 'text',
                 customdata: normalPoints.map(p => p.index)
@@ -605,6 +627,8 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 type: 'scatter',
                 name: '异常手部图像',
                 marker: {{ color: 'red', size: 8, opacity: 0.8, symbol: 'x' }},
+                selected: {{ marker: {{ opacity: 1.0 }} }},
+                unselected: {{ marker: {{ opacity: 0.12 }} }},
                 text: anomalousPoints.map(p => `索引: ${{p.index}}<br>类型: 异常`),
                 hoverinfo: 'text',
                 customdata: anomalousPoints.map(p => p.index)
@@ -616,6 +640,8 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 type: 'scatter',
                 name: '边界点',
                 marker: {{ color: 'green', size: 10, opacity: 0.9, symbol: 'diamond' }},
+                selected: {{ marker: {{ opacity: 1.0 }} }},
+                unselected: {{ marker: {{ opacity: 0.12 }} }},
                 text: boundaryPoints.map(p => `索引: ${{p.index}}<br>类型: 边界点`),
                 hoverinfo: 'text',
                 customdata: boundaryPoints.map(p => p.index)
@@ -628,16 +654,53 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 hovermode: 'closest',
                 showlegend: false,
                 height: 600,
-                plot_bgcolor: '#fafafa',                py code\\main.py
+                plot_bgcolor: '#fafafa',
                 paper_bgcolor: '#ffffff',
                 dragmode: 'pan'  // 默认平移模式（由原先的 'zoom' 修改）
             }};
-            const config = {{ responsive: true, displayModeBar: true, displaylogo: false, modeBarButtonsToAdd: ['toggleHover', 'resetViews'], scrollZoom: true }};
+
+            // 自定义工具栏按钮：有向线（画线后按方向排序展示图像）与清除
+            const fallbackLineIcon = {{
+                width: 1000,
+                height: 1000,
+                path: 'M120,880 L880,120 M760,140 L880,120 L860,240'
+            }};
+            const dirLineIcon = (Plotly.Icons && (Plotly.Icons.drawline || Plotly.Icons.pencil))
+                ? (Plotly.Icons.drawline || Plotly.Icons.pencil)
+                : fallbackLineIcon;
+            const eraseIcon = (Plotly.Icons && (Plotly.Icons.eraseshape || Plotly.Icons.close))
+                ? (Plotly.Icons.eraseshape || Plotly.Icons.close)
+                : fallbackLineIcon;
+
+            const dirLineButton = {{
+                name: 'Dir Line',
+                title: '画一条有方向的线，并按方向依次显示对应图像',
+                icon: dirLineIcon,
+                click: function(gd) {{
+                    activateDirectedLine(gd);
+                }}
+            }};
+            const clearDirLineButton = {{
+                name: 'Clear Line',
+                title: '清除有向线与排序结果',
+                icon: eraseIcon,
+                click: function(gd) {{
+                    clearDirectedLine(gd);
+                }}
+            }};
+
+            const config = {{
+                responsive: true,
+                displayModeBar: true,
+                displaylogo: false,
+                modeBarButtonsToAdd: ['toggleHover', 'resetViews', dirLineButton, clearDirLineButton],
+                scrollZoom: true
+            }};
             plot = Plotly.newPlot('plotly-chart', [traceNormal, traceAnomalous, traceBoundary], layout, config);
 
             document.getElementById('plotly-chart').on('plotly_click', function(data) {{
                 // 在框选/套索模式下禁用单点预览
-                if (currentDragMode === 'lasso' || currentDragMode === 'select') {{
+                if (currentDragMode === 'lasso' || currentDragMode === 'select' || currentDragMode === 'drawline') {{
                     return;
                 }}
                 if (data.points && data.points.length > 0) {{
@@ -674,22 +737,214 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 // 恢复所有点的高亮（selectedpoints=null），并刷新图表
                 Plotly.restyle('plotly-chart', {{'selectedpoints': null}});
                 Plotly.redraw('plotly-chart');
-                // 清除图上的框选叠加层与可能残留的形状
-                Plotly.relayout('plotly-chart', {{'selections': [], 'shapes': []}});
+                // 清除图上的框选叠加层（不要清空 shapes，避免误删有向线）
+                Plotly.relayout('plotly-chart', {{'selections': []}});
             }});
 
             // 监听工具切换（拖拽模式变化），当退出框选/套索时清空框选
             document.getElementById('plotly-chart').on('plotly_relayout', function(eventData) {{
+                const gd = document.getElementById('plotly-chart');
+
                 if (eventData && eventData['dragmode']) {{
+                    const prevDragMode = currentDragMode;
                     currentDragMode = eventData['dragmode'];
-                    if (currentDragMode !== 'lasso' && currentDragMode !== 'select') {{
+                    const wasSelect = (prevDragMode === 'lasso' || prevDragMode === 'select');
+                    const isSelect = (currentDragMode === 'lasso' || currentDragMode === 'select');
+                    // 仅当“退出”圈选/套索时才清空 UI，避免切换到 drawline 时误清空提示信息
+                    if (wasSelect && !isSelect) {{
                         clearSelectionUI();
                         // 立即恢复全图高光
                         Plotly.restyle('plotly-chart', {{'selectedpoints': null}});
                         Plotly.redraw('plotly-chart');
                     }}
                 }}
+
+                // 有向线：当 shape 更新（画线完成/编辑）时，解析最新线段并排序展示
+                if (!isApplyingDirectedLineRelayout && eventData) {{
+                    const keys = Object.keys(eventData);
+                    const hasShapeUpdate = ('shapes' in eventData) || keys.some(k => k.startsWith('shapes['));
+                    if (hasShapeUpdate) {{
+                        onShapesUpdated(gd);
+                    }}
+                }}
             }});
+        }}
+
+        function activateDirectedLine(gd) {{
+            directedLineActive = true;
+            currentDragMode = 'drawline';
+            document.getElementById('selected-images-content').innerHTML =
+                '<p>有向线模式：在图上拖拽画一条线（起点 → 终点），将按方向依次显示命中点的图像。</p>';
+            // 切换到 Plotly 的画线模式
+            Plotly.relayout(gd, {{'dragmode': 'drawline'}});
+        }}
+
+        function clearDirectedLine(gd) {{
+            directedLine = null;
+            directedLineActive = false;
+            isApplyingDirectedLineRelayout = true;
+            Plotly.relayout(gd, {{'shapes': [], 'annotations': [], 'selections': [], 'dragmode': 'pan'}})
+                .then(function() {{ isApplyingDirectedLineRelayout = false; }})
+                .catch(function() {{ isApplyingDirectedLineRelayout = false; }});
+            clearSelectionUI();
+            document.getElementById('selected-images-content').innerHTML = '<p>圈选多个点后显示所有图像</p>';
+        }}
+
+        function onShapesUpdated(gd) {{
+            // 取当前图上最后一条 line shape 作为“有向线”
+            const shapes = (gd && gd.layout && Array.isArray(gd.layout.shapes)) ? gd.layout.shapes : [];
+            if (!shapes || shapes.length === 0) {{
+                return;
+            }}
+            let lastLine = null;
+            for (let i = shapes.length - 1; i >= 0; i--) {{
+                const s = shapes[i];
+                if (s && s.type === 'line' && isFinite(Number(s.x0)) && isFinite(Number(s.y0)) && isFinite(Number(s.x1)) && isFinite(Number(s.y1))) {{
+                    lastLine = s;
+                    break;
+                }}
+            }}
+            if (!lastLine) {{
+                return;
+            }}
+
+            // 规范化并只保留这一条线（避免用户重复画出多条导致歧义）
+            const line = {{
+                x0: Number(lastLine.x0),
+                y0: Number(lastLine.y0),
+                x1: Number(lastLine.x1),
+                y1: Number(lastLine.y1)
+            }};
+            directedLine = line;
+
+            const shapeStyled = Object.assign({{}}, lastLine, {{
+                type: 'line',
+                xref: 'x',
+                yref: 'y',
+                line: Object.assign({{}}, lastLine.line || {{}}, {{ color: '#5b86e5', width: 3 }})
+            }});
+
+            const ann = {{
+                x: line.x1,
+                y: line.y1,
+                ax: line.x0,
+                ay: line.y0,
+                xref: 'x',
+                yref: 'y',
+                axref: 'x',
+                ayref: 'y',
+                text: '',
+                showarrow: true,
+                arrowhead: 3,
+                arrowsize: 1.1,
+                arrowwidth: 2,
+                arrowcolor: '#5b86e5'
+            }};
+
+            isApplyingDirectedLineRelayout = true;
+            Plotly.relayout(gd, {{'shapes': [shapeStyled], 'annotations': [ann]}})
+                .then(function() {{ isApplyingDirectedLineRelayout = false; }})
+                .catch(function() {{ isApplyingDirectedLineRelayout = false; }});
+
+            applyDirectedLineSelection(gd, line);
+        }}
+
+        function computeDirectedLineHits(line) {{
+            const vx = line.x1 - line.x0;
+            const vy = line.y1 - line.y0;
+            const L2 = vx * vx + vy * vy;
+            if (!(L2 > 1e-12)) {{
+                return [];
+            }}
+            const hits = [];
+            for (const p of pointsData) {{
+                const px = p.x - line.x0;
+                const py = p.y - line.y0;
+                const t = (px * vx + py * vy) / L2;
+                if (directedLineOnlySegment && (t < 0 || t > 1)) {{
+                    continue;
+                }}
+                const projx = t * vx;
+                const projy = t * vy;
+                const dx = px - projx;
+                const dy = py - projy;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist <= directedLineTol) {{
+                    hits.push({{ index: Number(p.index), t: t, dist: dist }});
+                }}
+            }}
+            hits.sort((a, b) => (a.t - b.t) || (a.dist - b.dist) || (a.index - b.index));
+            return hits.slice(0, directedLineMax);
+        }}
+
+        function applySelectedHighlightByIndices(gd, orderedIndices) {{
+            const indexSet = new Set(orderedIndices.map(x => Number(x)));
+            const selNormal = [];
+            const selAnom = [];
+            const selBoundary = [];
+
+            for (const idx of indexSet) {{
+                if (traceIndexToPos.normal.has(idx)) selNormal.push(traceIndexToPos.normal.get(idx));
+                if (traceIndexToPos.anomalous.has(idx)) selAnom.push(traceIndexToPos.anomalous.get(idx));
+                if (traceIndexToPos.boundary.has(idx)) selBoundary.push(traceIndexToPos.boundary.get(idx));
+            }}
+            // 依次对应 traceNormal/traceAnomalous/traceBoundary
+            Plotly.restyle(gd, {{'selectedpoints': [selNormal, selAnom, selBoundary]}});
+            Plotly.redraw(gd);
+        }}
+
+        function showDirectedLineImages(hits, line) {{
+            const selectedImagesContent = document.getElementById('selected-images-content');
+            selectedImagesContent.innerHTML = '';
+
+            if (!hits || hits.length === 0) {{
+                selectedImagesContent.innerHTML = '<p>有向线未命中任何点：可尝试画更长的线，或稍微加大阈值（directedLineTol）。</p>';
+                return;
+            }}
+
+            const header = document.createElement('div');
+            header.innerHTML = `
+                <p><strong>有向线命中 ${{hits.length}} 个点</strong>（从起点 → 终点）</p>
+                <p style="color:#5a6d8a;font-size:0.88rem; margin-top:6px;">
+                    起点(${{line.x0.toFixed(3)}}, ${{line.y0.toFixed(3)}}) → 终点(${{line.x1.toFixed(3)}}, ${{line.y1.toFixed(3)}})
+                    · 距离阈值=${{directedLineTol}} · 最大展示=${{directedLineMax}}
+                </p>
+            `;
+            selectedImagesContent.appendChild(header);
+
+            hits.forEach((h, rank) => {{
+                const point = pointsData.find(p => Number(p.index) === Number(h.index));
+                if (!point) return;
+                const imgDiv = document.createElement('div');
+                imgDiv.className = 'selected-image';
+                const imgUrl = IMAGE_API_BASE + '/' + point.index + '?dataset=' + encodeURIComponent(DATASET_NAME) + '&t=' + Date.now();
+                imgDiv.innerHTML = `
+                    <div><strong>#${{rank + 1}} · 索引 ${{point.index}}</strong></div>
+                    <img src="${{imgUrl}}" alt="手部图像 ${{point.index}}" style="max-width: 100px; max-height: 100px; cursor:pointer;" onerror="this.style.display='none'">
+                    <div>类型: ${{point.cluster === 'normal' ? '正常' : '异常'}}</div>
+                    <div>边界点: ${{point.is_boundary ? '是' : '否'}}</div>
+                    <div style="color:#5a6d8a;font-size:0.82rem;">t=${{h.t.toFixed(4)}} · dist=${{h.dist.toFixed(4)}}</div>
+                `;
+                const imgEl = imgDiv.querySelector('img');
+                if (imgEl) {{
+                    imgEl.onclick = function() {{
+                        showPointInfo(point.index);
+                    }};
+                }}
+                selectedImagesContent.appendChild(imgDiv);
+            }});
+        }}
+
+        function applyDirectedLineSelection(gd, line) {{
+            const hits = computeDirectedLineHits(line);
+            const ordered = hits.map(h => h.index);
+            showDirectedLineImages(hits, line);
+            if (ordered.length > 0) {{
+                applySelectedHighlightByIndices(gd, ordered);
+            }} else {{
+                Plotly.restyle(gd, {{'selectedpoints': null}});
+                Plotly.redraw(gd);
+            }}
         }}
 
         function showPointInfo(pointIndex) {{
@@ -781,12 +1036,19 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
         }}
 
         function resetView() {{
+            directedLine = null;
+            directedLineActive = false;
+            isApplyingDirectedLineRelayout = true;
             Plotly.relayout('plotly-chart', {{
                 'xaxis.range': [0, 1],
                 'yaxis.range': [0, 1],
                 'selections': [],
-                'shapes': []
-            }});
+                'shapes': [],
+                'annotations': [],
+                'dragmode': 'pan'
+            }})
+                .then(function() {{ isApplyingDirectedLineRelayout = false; }})
+                .catch(function() {{ isApplyingDirectedLineRelayout = false; }});
             selectedPoints = [];
             document.getElementById('point-info-content').innerHTML = '点击图表中的点查看详细信息';
             const imgEl = document.getElementById('preview-image');
@@ -805,8 +1067,8 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
             if (imgEl) {{ imgEl.style.display = 'none'; imgEl.src = ''; }}
             if (caption) {{ caption.textContent = '选择点后显示对应图像'; }}
             Plotly.restyle('plotly-chart', {{'selectedpoints': null}});
-            // 同步清除图上的框选/套索轮廓和可能的形状
-            Plotly.relayout('plotly-chart', {{'selections': [], 'shapes': []}});
+            // 同步清除图上的框选/套索轮廓（不要清空 shapes，避免误删有向线）
+            Plotly.relayout('plotly-chart', {{'selections': []}});
         }}
 
         document.addEventListener('DOMContentLoaded', function() {{
