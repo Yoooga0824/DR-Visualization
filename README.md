@@ -8,7 +8,10 @@
 当前已支持多种降维方法前缀（如 TSNE、NeuralTSNE、UMAP 等），每种方法可独立生成 mapping 和 HTML。
 
 将降维结果放入本仓库下的 data/*-features 目录（例如 data/Hands-features 或 data/yalefaces-features）中：
-- <prefix>_embedding.npy 和 anomalous_<prefix>_embedding.npy
+- <prefix>_features.npy（推荐命名）
+- （兼容旧命名）<prefix>_embedding.npy
+若你仍保留“双集合/异常侧”文件，也兼容：
+- anomalous_<prefix>_features.npy / anomalous_<prefix>_embedding.npy
 然后运行 make_embedding_mapping.py 和 boundary_analysis.py 生成映射与 HTML；也可用 main.py 批量处理。
 
 ---
@@ -34,8 +37,11 @@ DR-Visualization/
 │  │  ├─ mnist/                   # mnist 正常样本图片目录（*.png，反向生成 <index>.png）
 │  │  └─ Anomalous_mnist/         # mnist 异常样本图片目录（*.png，反向生成 <index>.png）
 │  ├─ Hands-features/ 或 yalefaces-features/ 或 mnist-features/
-│  │  ├─ <prefix>_embedding.npy               # 正常样本降维向量
-│  │  ├─ anomalous_<prefix>_embedding.npy     # 异常样本降维向量
+│  │  ├─ features.npy                         # 整体照片提取的高维特征
+│  │  ├─ <prefix>_features.npy                # 降维后的低维特征（推荐命名）
+│  │  ├─ <prefix>_embedding.npy               # 兼容旧命名
+│  │  ├─ anomalous_<prefix>_features.npy      # 异常侧（可选）
+│  │  ├─ anomalous_<prefix>_embedding.npy     # 异常侧旧命名（可选）
 │  │  ├─ failed_images.txt                    # 正常样本默认过滤清单（可选）
 │  │  ├─ failed_images_<prefix>.txt           # 正常样本按前缀过滤清单（可选）
 │  │  ├─ anomalous_failed_images.txt          # 异常样本默认过滤清单（可选）
@@ -73,14 +79,15 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
 - mnist：
   - 若你只有 `data/mnist-features/*.npy` 而没有原始图像，可先用 `code/translate_npy_to_image.py` 反向生成原图到 `data/raw/mnist` 与 `data/raw/Anomalous_mnist`（见下文“MNIST 指南”）。
 - 将降维结果放入 `data/*-features/`：
-  - 正常：`<prefix>_embedding.npy`
-  - 异常：`anomalous_<prefix>_embedding.npy`
+  - 正常：`<prefix>_features.npy`（推荐）或 `<prefix>_embedding.npy`（兼容）
+  - 异常（可选）：`anomalous_<prefix>_features.npy` 或 `anomalous_<prefix>_embedding.npy`
 
 2) 生成映射（mapping）
 - 单方法：运行 `code/make_embedding_mapping.py`，示例（Windows 推荐使用 `py`）：
   - `py code/make_embedding_mapping.py --prefix TSNE`
   - 可选：`--no-filter` 关闭正常与异常的 failed 过滤
   - 可选：`--anom-list D:\path\to\anom_list.txt` 精确指定异常图片集合与顺序（跳过异常 failed 过滤）
+  - 可选（推荐，严格对齐）：`--files-list data/<dataset>-features/files.txt` 直接按特征提取时的权威顺序生成 mapping（适用于你把 raw/<dataset> 与 raw/Anomalous_<dataset> 合并成一个“单集合”特征矩阵的情况）
   - 交互改进：选择数据集后，脚本只会展示该数据集相关的原始/异常目录；若唯一可选则自动选择。并会自动检测图片扩展名（如 yalefaces 为 *.png），提供合适的默认匹配规则；默认采用“自然排序”对齐文件名与 embedding 顺序。
 
 3) 启动图片服务（建议先启动）
@@ -124,6 +131,97 @@ py D:\DR-Visualization\code\boundary_analysis.py --prefix TSNE --features-dir D:
 
 ---
 
+## 从原始图像提取高维特征（新增）
+
+当你只有 `data/raw/<dataset>/`（以及可选的 `data/raw/Anomalous_<dataset>/`）的原始图像、还没有 `*_features.npy` 时，可以先用脚本提取高维特征矩阵（embedding/features）。
+
+脚本位置：`code/extract_image_features.py`
+
+输出（默认）：`data/<dataset>-features/`
+- `features.npy`（单一特征矩阵，不区分 normal/anomalous）
+- `files.txt`：参与提取的文件路径顺序（非常重要，用于云端降维/本地映射严格对齐）
+- `failed_images.txt`：读取失败的文件名清单（兼容 mapping 的过滤机制）
+
+示例：
+
+```powershell
+# Hands：读取 data/raw/Hands 与 data/raw/Anomalous_Hands，输出到 data/Hands-features
+py code/extract_image_features.py --dataset Hands --model resnet18 --batch-size 64
+
+# 禁用自动合并 Anomalous_<dataset>（若你只想处理 data/raw/<dataset>）
+py code/extract_image_features.py --dataset yalefaces --no-auto-merge-anom
+
+# 指定自定义目录与输出目录
+py code/extract_image_features.py --normal-dir D:/data/myset --out-dir D:/DR-Visualization/data/myset-features
+```
+
+当你使用“合并目录”模式（同时读 raw/<dataset> 与 raw/Anomalous_<dataset>）时，后续生成 mapping 请优先使用：
+
+```powershell
+py code/make_embedding_mapping.py --features-dir data/Hands-features --prefix PCA --files-list data/Hands-features/files.txt
+```
+
+依赖：`torch`, `torchvision`, `Pillow`, `numpy`。若未安装，脚本会提示安装方式。
+
+---
+
+## 通用边界检测（新增）
+
+当你已经有高维特征（`features.npy`）以及（可选）低维降维结果（`<method>_features.npy`；兼容旧 `*_embedding.npy`）时，可以用脚本对高维/低维分别执行边界检测（支持多种检测器），并按命名规范保存边界点/非边界点数组，便于后续对比“高维边界 vs 低维边界”。
+
+脚本位置：`code/detect_boundaries.py`
+
+输出（默认）：直接保存到 `data/<dataset>-features/`，每个空间各输出两份 `.npy`：
+- 高维：`features_<detector>_boundary.npy` / `features_<detector>_normal.npy`
+- 低维：`<method>_<detector>_boundary.npy` / `<method>_<detector>_normal.npy`
+
+示例：
+
+```powershell
+# 只在高维 features.npy 上检测边界
+py code/detect_boundaries.py --high data/Hands-features/features.npy --detector bdlle --k 150 --d 2
+
+# 换一种检测器：KNN 距离边界（依赖 scipy）
+py code/detect_boundaries.py --high data/Hands-features/features.npy --detector knn_distance --k 50
+
+# 换一种检测器：One-Class SVM（依赖 scikit-learn）
+py code/detect_boundaries.py --high data/Hands-features/features.npy --detector ocsvm --threshold-mode internal
+
+# 同时在高维与低维 features 上检测边界
+py code/detect_boundaries.py `
+  --high data/Hands-features/features.npy `
+  --low  data/Hands-features/TSNE_features.npy `
+  --detector bdlle --k-high 150 --k-low 100 --d 2 --threshold-mode ratio --threshold-ratio 0.7
+```
+
+说明：脚本会检查高维与低维的样本数是否一致（N 必须相同），以保证同一索引对应同一样本。
+
+---
+
+## 计算降维 embedding（新增）
+
+本仓库新增了降维模块目录：`code/dimred/`，并提供统一脚本从高维特征矩阵生成低维特征（用于可视化）：
+- 脚本：`code/compute_embeddings.py`
+- 输入：`features.npy`（二维 `[N, D]`）
+- 输出：`<PREFIX>_features.npy`（二维 `[N, 2]`，默认 2 维）
+
+内置方法：
+- `pca`：纯 NumPy 实现（无额外依赖，推荐用它先跑通整条流程）
+- `tsne`：依赖 `scikit-learn`
+- `umap`：依赖 `umap-learn`
+
+示例：
+
+```powershell
+# 默认只跑 PCA（无额外依赖），输出 PCA_features.npy 到 features 同目录
+py code/compute_embeddings.py --features data/Hands-features/features.npy
+
+# 一次生成多个 embedding（逗号分隔）
+py code/compute_embeddings.py --features data/Hands-features/features.npy --methods pca,tsne
+```
+
+---
+
 ## 批量处理（推荐）
 
 - 入口：`code/main.py`
@@ -145,9 +243,9 @@ py D:\DR-Visualization\code\boundary_analysis.py --prefix TSNE --features-dir D:
 - 若提供 `--anom-list`，则跳过异常侧的 failed 过滤（按清单精确选图与排序）
 
 3) 严格一致性校验
-- 正常侧：过滤后图片数量必须等于 `len(<prefix>_embedding.npy)`
-- 异常侧：图片数量必须等于 `len(anomalous_<prefix>_embedding.npy)`
-- 否则脚本直接抛错，避免 embedding/图片错位
+- 正常侧：过滤后图片数量必须等于 `len(<prefix>_features.npy)`（或兼容旧 `len(<prefix>_embedding.npy)`）
+- 异常侧：图片数量必须等于 `len(anomalous_<prefix>_features.npy)`（或兼容旧 `len(anomalous_<prefix>_embedding.npy)`）
+- 否则脚本直接抛错，避免坐标/图片错位
 
 ---
 
@@ -157,7 +255,7 @@ py D:\DR-Visualization\code\boundary_analysis.py --prefix TSNE --features-dir D:
   - 正常样本 index 从 0 开始，异常样本紧接其后，保证全局唯一连续
   - 每条记录包含：
     - `index`：全局索引
-    - `embedding_coords`：对应降维向量
+    - `embedding_coords`：对应低维坐标（文件名可能是 *_features.npy 或 *_embedding.npy）
     - `image_path`：该样本图片绝对路径
     - `features`：预留字段
 
@@ -203,8 +301,9 @@ py D:\DR-Visualization\code\boundary_analysis.py --prefix TSNE --features-dir D:
   - 原始图片：`data/raw/<dataset>/`
   - 异常图片：`data/raw/Anomalous_<dataset>/`
 - 必备文件：
-  - `data/<dataset>-features/<prefix>_embedding.npy`
-  - `data/<dataset>-features/anomalous_<prefix>_embedding.npy`
+  - `data/<dataset>-features/features.npy`
+  - `data/<dataset>-features/<prefix>_features.npy`（推荐）或 `<prefix>_embedding.npy`（兼容）
+  - （可选异常侧）`data/<dataset>-features/anomalous_<prefix>_features.npy` 或 `anomalous_<prefix>_embedding.npy`
 - 可选文件：
   - `failed_images.txt`、`failed_images_<prefix>.txt`
   - `anomalous_failed_images.txt`、`anomalous_failed_images_<prefix>.txt`
@@ -227,7 +326,7 @@ py D:\DR-Visualization\code\boundary_analysis.py --prefix TSNE --features-dir D:
   - `--anom-list` 指定异常图片清单（绝对路径或文件名，逐行一条）
 
 - 新增一种降维方法的接入
-  - 将 `<prefix>_embedding.npy` 与 `anomalous_<prefix>_embedding.npy` 放入 `data/*-features/`
+  - 将 `<prefix>_features.npy`（或兼容旧 `<prefix>_embedding.npy`）放入 `data/*-features/`
   - 运行 `python code/main.py` 选择该方法即可
 
 ---

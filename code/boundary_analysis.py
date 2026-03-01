@@ -70,24 +70,43 @@ def load_and_normalize_data():
     print("加载并归一化数据...")
 
     # 数据路径根据前缀和 features_dir 自动切换
-    normal_embedding = np.load(os.path.join(features_dir, f'{prefix}_embedding.npy'))
-    anomalous_embedding = np.load(os.path.join(features_dir, f'anomalous_{prefix}_embedding.npy'))
+    normal_path = os.path.join(features_dir, f'{prefix}_features.npy')
+    if not os.path.exists(normal_path):
+        # 兼容旧命名
+        normal_path = os.path.join(features_dir, f'{prefix}_embedding.npy')
+    normal_embedding = np.load(normal_path)
 
-    # 合并数据
-    combined_embedding = np.vstack([normal_embedding, anomalous_embedding])
+    anom_path = os.path.join(features_dir, f'anomalous_{prefix}_features.npy')
+    if not os.path.exists(anom_path):
+        anom_path = os.path.join(features_dir, f'anomalous_{prefix}_embedding.npy')
+    anomalous_embedding = None
+    if os.path.exists(anom_path):
+        anomalous_embedding = np.load(anom_path)
+
+    # 合并数据（兼容单集合模式：无 anomalous 文件时只使用 normal_embedding）
+    if anomalous_embedding is not None:
+        combined_embedding = np.vstack([normal_embedding, anomalous_embedding])
+    else:
+        combined_embedding = normal_embedding
 
     # 归一化到[0,1]范围
     min_vals = np.min(combined_embedding, axis=0)
     max_vals = np.max(combined_embedding, axis=0)
     normalized_embedding = (combined_embedding - min_vals) / (max_vals - min_vals)
 
-    # 创建标签
+    # 创建标签（若无 anomalous，则全为 0）
     normal_labels = np.zeros(len(normal_embedding))
-    anomalous_labels = np.ones(len(anomalous_embedding))
-    combined_labels = np.concatenate([normal_labels, anomalous_labels])
+    if anomalous_embedding is not None:
+        anomalous_labels = np.ones(len(anomalous_embedding))
+        combined_labels = np.concatenate([normal_labels, anomalous_labels])
+    else:
+        combined_labels = normal_labels
 
     print(f"归一化后数据形状: {normalized_embedding.shape}")
-    print(f"正常样本: {len(normal_embedding)}, 异常样本: {len(anomalous_embedding)}")
+    if anomalous_embedding is not None:
+        print(f"正常样本: {len(normal_embedding)}, 异常样本: {len(anomalous_embedding)}")
+    else:
+        print(f"样本数: {len(normal_embedding)}（未检测到 anomalous_{prefix}_features.npy / anomalous_{prefix}_embedding.npy，按单集合模式处理）")
 
     return normalized_embedding, combined_labels
 
@@ -119,8 +138,12 @@ def calculate_wasserstein_metrics(normalized_embedding, labels, boundary_indices
 
     # 分离正常和异常点
     anomalous_mask = labels == 1
-
     anomalous_points = normalized_embedding[anomalous_mask]
+
+    # 单集合模式下没有 anomalous 点：指标记为 0.0（也可视为 N/A）
+    if anomalous_points.shape[0] == 0:
+        print("未检测到 anomalous 点，跳过 Wasserstein 距离计算。")
+        return 0.0
 
     # 将numpy数组转换为PyTorch Tensor（wasserstein_loss需要的格式）
     import torch

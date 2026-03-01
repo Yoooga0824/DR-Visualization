@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 
 import glob
+import numpy as np
 
 
 # 自动遍历所有 features 目录（如 data/Hands-features, data/yalefaces-features 等）
@@ -71,15 +72,38 @@ if __name__ == "__main__":
 
     print(f"检测到数据集目录: {[os.path.basename(d) for d in features_dirs]}")
 
-    # 搜索所有选中 features 目录下的 embedding 前缀
+    # 搜索所有选中 features 目录下的方法前缀（优先 *_features.npy，兼容旧 *_embedding.npy）
     method_prefixes = set()
-    pattern = re.compile(r'^(anomalous_)?([A-Za-z0-9_]+)_embedding\.npy$')
+    dataset_names = {os.path.basename(d).replace('-features', '').lower() for d in features_dirs}
+    patterns = [
+        re.compile(r'^(anomalous_)?([A-Za-z0-9_]+)_features\.npy$'),
+        re.compile(r'^(anomalous_)?([A-Za-z0-9_]+)_embedding\.npy$'),
+    ]
+    def is_low_dim_coords(path: str) -> bool:
+        try:
+            arr = np.load(path, mmap_mode='r')
+            return isinstance(arr, np.ndarray) and arr.ndim == 2 and 2 <= arr.shape[1] <= 3
+        except Exception:
+            return False
+
     for features_dir in features_dirs:
         files = os.listdir(features_dir)
         for fname in files:
-            m = pattern.match(fname)
-            if m and not fname.startswith('anomalous_'):
-                method_prefixes.add(m.group(2))
+            for pattern in patterns:
+                m = pattern.match(fname)
+                if not m:
+                    continue
+                if fname.startswith('anomalous_'):
+                    continue
+                p = m.group(2)
+                # 排除高维特征文件（旧：<dataset>_features.npy；新：features.npy 不会匹配这里）
+                if p.lower() in dataset_names:
+                    continue
+                full = os.path.join(features_dir, fname)
+                if not is_low_dim_coords(full):
+                    continue
+                method_prefixes.add(p)
+                break
     method_prefixes = sorted(method_prefixes)
 
     # 选择降维方法
@@ -94,10 +118,11 @@ if __name__ == "__main__":
         print(f"\n==== 处理方法: {prefix} ====")
         # 针对每个 features 目录都执行 mapping 和 HTML 生成
         for features_dir in features_dirs:
-            # 检查该 features 目录下是否有该 prefix 的 embedding 文件
+            # 检查该 features 目录下是否有该 prefix 的坐标文件（优先 *_features.npy）
+            feat_path = os.path.join(features_dir, f'{prefix}_features.npy')
             emb_path = os.path.join(features_dir, f'{prefix}_embedding.npy')
-            if not os.path.exists(emb_path):
-                print(f"[跳过] {features_dir} 不存在 {prefix}_embedding.npy")
+            if (not os.path.exists(feat_path)) and (not os.path.exists(emb_path)):
+                print(f"[跳过] {features_dir} 不存在 {prefix}_features.npy / {prefix}_embedding.npy")
                 continue
             print(f"-- 数据集目录: {features_dir}")
             # 2. 生成 mapping
