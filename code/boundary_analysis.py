@@ -583,7 +583,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
         let currentDragMode = 'pan'; // 默认平移模式
 
         // 有向线功能：画线（x0,y0）->（x1,y1），按方向投影排序后显示图像
-        let directedLine = null; // {x0, y0, x1, y1}
+        let directedLine = null; // x0,y0 -> x1,y1
         let directedLineActive = false;
         let directedLineTol = 0.02; // 距离阈值（坐标已归一化到[0,1]）
         let directedLineMax = 120;  // 最多展示点数（避免一次性加载过多图片）
