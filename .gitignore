@@ -10,11 +10,22 @@ __pycache__/
 data/raw/
 
 # Feature arrays and large numpy artifacts
+*.npy
+*.npz
 data/*-features/*.npy
 data/*-features/*.npz
 data/*-features/*_embedding.npy
 data/*-features/anomalous_*_embedding.npy
 data/mnist-features/*.npy
+
+# Generated mappings / artifacts (HTML reports are also ignored)
+results/*-results/*.json
+results/*-results/**/*.json
+data/*-features/*.json
+
+# Generated HTML reports
+results/*-results/*.html
+results/*-results/**/*.html
 
 # Keep small text configs in features
 !data/*-features/*.txt

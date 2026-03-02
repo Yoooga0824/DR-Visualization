@@ -5,10 +5,15 @@ import numpy as np
 from .types import BoundaryResult
 
 
+# 全局默认 K：不显式传参时将使用该值。
+# 你只需要改这里，就能影响 knn_distance 的默认行为。
+KNN_DISTANCE_K = 100
+
+
 def detect_knn_distance(
     x: np.ndarray,
     *,
-    k: int,
+    k: int | None = None,
     threshold_mode: str = "ratio",
     threshold_ratio: float = 0.7,
     **kwargs,
@@ -21,6 +26,9 @@ def detect_knn_distance(
     threshold_mode:
     - internal: 使用 80% 分位数作为阈值（经验值）
     - ratio: 使用 ratio*max(score) 作为阈值
+
+    参数 k:
+    - 若不传（或传 None），默认使用本模块全局变量 KNN_DISTANCE_K。
     """
     if not isinstance(x, np.ndarray) or x.ndim != 2:
         raise ValueError("输入必须是二维 numpy 数组 [N, D]")
@@ -31,6 +39,8 @@ def detect_knn_distance(
         normal_indices = np.array([], dtype=np.int64)
         return BoundaryResult(boundary_indices=boundary_indices, normal_indices=normal_indices, scores=np.zeros(n))
 
+    if k is None:
+        k = KNN_DISTANCE_K
     k = int(k)
     if k <= 0:
         raise ValueError("k 必须为正")
