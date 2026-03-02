@@ -602,8 +602,8 @@ def generate_interactive_html(
             <h1>{prefix} · {detector} 边界分析可视化 · 交互式</h1>
             <div class="sub">点击或圈选点查看对应的手部原始图像</div>
             <div class="pills">
-                <span class="pill" title="原空间边界文件">features_{detector}_boundary.npy</span>
-                <span class="pill" title="隐空间边界文件">{prefix}_{detector}_boundary.npy</span>
+                <span class="pill" title="降维方法">Method = {prefix}</span>
+                <span class="pill" title="边界检测方法">Detector = {detector}</span>
             </div>
         </div>
         <div class="metrics">
