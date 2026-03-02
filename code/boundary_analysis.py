@@ -1,24 +1,29 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from scipy.spatial import KDTree
-from detection.BDLLE import bd_lle
 import sys
 import os
 import time
-from tqdm import tqdm
 import json
 from pathlib import Path
 import argparse
+from typing import Optional, Tuple
+
+# matplotlib/tqdm 仅用于旧的静态图函数；生成 HTML 不需要。
+try:  # pragma: no cover
+    import matplotlib.pyplot as plt
+except Exception:  # pragma: no cover
+    plt = None
 
 # 参数化前缀
 
 parser = argparse.ArgumentParser(description='交互式边界分析可视化，支持多降维方法和多数据集')
 parser.add_argument('--prefix', type=str, default='TSNE', help='降维方法前缀，如 TSNE、NeuralTSNE、UMAP')
+parser.add_argument('--detector', type=str, default='bdlle', help='边界检测方法名（用于读取已保存的边界结果文件，如 bdlle/knn_distance/ocsvm）')
 parser.add_argument('--features-dir', type=str, default=None, help='features 目录（如 data/Hands-features），自动推断数据集名')
 parser.add_argument('--results-dir', type=str, default=None, help='结果保存目录（如 results/Hands-results），如未指定自动推断')
 parser.add_argument('--img-base', type=str, default=None, help='图片服务基地址，如 http://172.16.57.85:5678（file:// 环境下请不要使用 window.location）')
 args = parser.parse_args()
 prefix = args.prefix
+detector = (args.detector or 'bdlle').strip()
 # 默认本地服务器，避免生成 HTML 指向内网 IP
 image_api_base = args.img_base if args.img_base else 'http://localhost:5678'
 
@@ -53,112 +58,177 @@ else:
     RESULTS_DIR = os.path.join(results_root, f'{dataset_name}-results')
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-# 全局K值设置
-K_NEIGHBORS = 100  # 修改此处即可全局生效
+# 兼容：旧版页面顶部曾展示 K/Threshold。
+# 新版页面读取 detect_boundaries.py 产生的边界结果文件，因此这里不再假定固定 K/Threshold。
 
 # 添加自定义模块路径（如果需要可以保留）
 sys.path.append(os.path.abspath('./code/'))
 
-# 导入tool_functions中的wasserstein_loss函数
-from tool_functions import wasserstein_loss
+def _try_import_wasserstein_loss():
+    """优先使用仓库已有的 wasserstein_loss（geomloss），失败则返回 None。"""
+    try:
+        from tool_functions import wasserstein_loss  # type: ignore
 
-print("成功导入wasserstein_loss函数")
+        return wasserstein_loss
+    except Exception:
+        return None
+
+
+def _wasserstein_fallback(a: np.ndarray, b: np.ndarray) -> float:
+    """无 torch/geomloss 时的轻量 fallback：按维度计算 1D Wasserstein 并取均值。"""
+    try:
+        from scipy.stats import wasserstein_distance
+    except Exception as e:
+        raise RuntimeError(f"缺少 scipy.stats.wasserstein_distance，无法计算 Wasserstein 距离：{e}")
+
+    if a.size == 0 or b.size == 0:
+        return float('nan')
+
+    dims = min(a.shape[1], b.shape[1])
+    vals = [float(wasserstein_distance(a[:, i], b[:, i])) for i in range(dims)]
+    return float(np.mean(vals))
+
+
+def compute_wasserstein(a: np.ndarray, b: np.ndarray) -> float:
+    """计算两个点集之间的 Wasserstein 距离（优先 geomloss，否则 fallback）。"""
+    wloss = _try_import_wasserstein_loss()
+    if wloss is None:
+        return _wasserstein_fallback(a, b)
+
+    # geomloss 版本需要 torch tensor
+    try:
+        import torch
+
+        ta = torch.tensor(a, dtype=torch.float32)
+        tb = torch.tensor(b, dtype=torch.float32)
+        val = wloss(ta, tb)
+        return float(val.detach().cpu().item())
+    except Exception:
+        # 如果 torch/geomloss 任何一环失败，回退到 scipy 的按维度 1D Wasserstein
+        return _wasserstein_fallback(a, b)
+
+
+def _load_npy(path: str) -> np.ndarray:
+    arr = np.load(path)
+    if not isinstance(arr, np.ndarray):
+        raise ValueError(f"无法读取为 numpy.ndarray: {path}")
+    if arr.ndim != 2:
+        raise ValueError(f"期望二维数组 [N, D]，实际 {arr.ndim} 维：{path}")
+    return arr
+
+
+def _find_features_file() -> str:
+    """优先 features.npy，兼容 <dataset>_features.npy。"""
+    p = os.path.join(features_dir, 'features.npy')
+    if os.path.exists(p):
+        return p
+    legacy = os.path.join(features_dir, f'{dataset_name}_features.npy')
+    if os.path.exists(legacy):
+        return legacy
+    raise FileNotFoundError(f"未找到高维特征文件：{p}（或兼容旧命名 {legacy}）")
+
+
+def _row_view(arr: np.ndarray) -> np.ndarray:
+    """将二维数组按行视为定长 bytes，便于做 isin。"""
+    a = np.ascontiguousarray(arr)
+    if a.ndim != 2:
+        raise ValueError("仅支持二维数组")
+    return a.view(np.dtype((np.void, a.dtype.itemsize * a.shape[1]))).ravel()
+
+
+def indices_from_subset(full: np.ndarray, subset: np.ndarray) -> np.ndarray:
+    """给定 full（[N,D]）与 subset（[M,D]，来自 full 的行子集），返回 subset 对应在 full 中的索引集合。"""
+    if subset.size == 0:
+        return np.array([], dtype=np.int64)
+    if full.ndim != 2 or subset.ndim != 2 or full.shape[1] != subset.shape[1]:
+        raise ValueError("full/subset 维度不匹配")
+    full_v = _row_view(full)
+    subset_v = _row_view(subset)
+    mask = np.isin(full_v, subset_v)
+    return np.where(mask)[0].astype(np.int64)
 
 
 
-def load_and_normalize_data():
-    print("加载并归一化数据...")
+def load_and_normalize_data() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """加载低维坐标并归一化到 [0,1]，同时返回 labels（用于颜色：normal/anomalous）。
 
-    # 数据路径根据前缀和 features_dir 自动切换
+    返回：(raw_embedding, normalized_embedding, labels)
+    """
+    print("加载并归一化低维数据...")
+
+    # 低维坐标（优先 *_features.npy，兼容旧 *_embedding.npy）
     normal_path = os.path.join(features_dir, f'{prefix}_features.npy')
     if not os.path.exists(normal_path):
-        # 兼容旧命名
         normal_path = os.path.join(features_dir, f'{prefix}_embedding.npy')
-    normal_embedding = np.load(normal_path)
+    raw_embedding = _load_npy(normal_path)
 
+    # 兼容旧数据：如果存在 anomalous 前缀则用于区分颜色；否则全视为 normal
     anom_path = os.path.join(features_dir, f'anomalous_{prefix}_features.npy')
     if not os.path.exists(anom_path):
         anom_path = os.path.join(features_dir, f'anomalous_{prefix}_embedding.npy')
+
     anomalous_embedding = None
     if os.path.exists(anom_path):
-        anomalous_embedding = np.load(anom_path)
+        anomalous_embedding = _load_npy(anom_path)
 
-    # 合并数据（兼容单集合模式：无 anomalous 文件时只使用 normal_embedding）
     if anomalous_embedding is not None:
-        combined_embedding = np.vstack([normal_embedding, anomalous_embedding])
+        combined = np.vstack([raw_embedding, anomalous_embedding])
+        labels = np.concatenate([np.zeros(len(raw_embedding)), np.ones(len(anomalous_embedding))])
     else:
-        combined_embedding = normal_embedding
+        combined = raw_embedding
+        labels = np.zeros(len(raw_embedding))
 
-    # 归一化到[0,1]范围
-    min_vals = np.min(combined_embedding, axis=0)
-    max_vals = np.max(combined_embedding, axis=0)
-    normalized_embedding = (combined_embedding - min_vals) / (max_vals - min_vals)
+    # 归一化到[0,1]范围（用于可视化/距离度量的尺度统一）
+    min_vals = np.min(combined, axis=0)
+    max_vals = np.max(combined, axis=0)
+    denom = (max_vals - min_vals)
+    denom[denom == 0] = 1.0
+    normalized = (combined - min_vals) / denom
 
-    # 创建标签（若无 anomalous，则全为 0）
-    normal_labels = np.zeros(len(normal_embedding))
-    if anomalous_embedding is not None:
-        anomalous_labels = np.ones(len(anomalous_embedding))
-        combined_labels = np.concatenate([normal_labels, anomalous_labels])
-    else:
-        combined_labels = normal_labels
+    print(f"低维坐标形状: normal={raw_embedding.shape}（combined={combined.shape}）")
+    return combined, normalized, labels
 
-    print(f"归一化后数据形状: {normalized_embedding.shape}")
-    if anomalous_embedding is not None:
-        print(f"正常样本: {len(normal_embedding)}, 异常样本: {len(anomalous_embedding)}")
-    else:
-        print(f"样本数: {len(normal_embedding)}（未检测到 anomalous_{prefix}_features.npy / anomalous_{prefix}_embedding.npy，按单集合模式处理）")
+def load_boundary_files() -> Tuple[np.ndarray, np.ndarray]:
+    """读取已保存的边界点子集（高维/低维）。"""
+    det = detector.lower()
+    high_boundary_path = os.path.join(features_dir, f'features_{det}_boundary.npy')
+    low_boundary_path = os.path.join(features_dir, f'{prefix}_{det}_boundary.npy')
 
-    return normalized_embedding, combined_labels
+    if not os.path.exists(high_boundary_path):
+        raise FileNotFoundError(
+            f"未找到原空间边界文件：{high_boundary_path}\n"
+            "请先运行 detect_boundaries.py 生成 features_<detector>_boundary.npy"
+        )
+    if not os.path.exists(low_boundary_path):
+        raise FileNotFoundError(
+            f"未找到隐空间边界文件：{low_boundary_path}\n"
+            "请先运行 detect_boundaries.py 生成 <method>_<detector>_boundary.npy"
+        )
 
-def detect_boundary_fixed_params(normalized_embedding):
-    print("使用固定参数检测边界点:")
-    print("注意: 由于K值较大，计算可能需要较长时间...")
+    high_boundary = _load_npy(high_boundary_path)
+    low_boundary = _load_npy(low_boundary_path)
+    return high_boundary, low_boundary
 
-    start_time = time.time()
+def calculate_wasserstein_metrics(
+    *,
+    normalized_low: np.ndarray,
+    high_boundary_indices: np.ndarray,
+    low_boundary_indices: np.ndarray,
+) -> float:
+    """将“原空间边界点”和“隐空间边界点”都投到隐空间坐标上，计算二者的 Wasserstein 距离。"""
+    if high_boundary_indices.size == 0 or low_boundary_indices.size == 0:
+        return float('nan')
+    a = normalized_low[high_boundary_indices]
+    b = normalized_low[low_boundary_indices]
+    return compute_wasserstein(a, b)
 
-    # 使用全局K值
-    boundary_points, B = bd_lle(normalized_embedding, d=2, K=K_NEIGHBORS)
-
-    # 计算耗时
-    computation_time = time.time() - start_time
-    print(f"BD-LLE计算完成，耗时: {computation_time:.2f}秒 ({computation_time / 60:.1f}分钟)")
-
-    # 应用固定阈值
-    maxB = np.max(B)
-    threshold = 0.7 * maxB
-    boundary_indices = np.where(B >= threshold)[0]
-
-    print(f"检测到 {len(boundary_indices)} 个边界点")
-    return boundary_indices
-
-def calculate_wasserstein_metrics(normalized_embedding, labels, boundary_indices):
-    print("使用Wasserstein距离计算边界指标...")
-
-    boundary_points = normalized_embedding[boundary_indices]
-
-    # 分离正常和异常点
-    anomalous_mask = labels == 1
-    anomalous_points = normalized_embedding[anomalous_mask]
-
-    # 单集合模式下没有 anomalous 点：指标记为 0.0（也可视为 N/A）
-    if anomalous_points.shape[0] == 0:
-        print("未检测到 anomalous 点，跳过 Wasserstein 距离计算。")
-        return 0.0
-
-    # 将numpy数组转换为PyTorch Tensor（wasserstein_loss需要的格式）
-    import torch
-    anomalous_tensor = torch.tensor(anomalous_points, dtype=torch.float32)
-    boundary_tensor = torch.tensor(boundary_points, dtype=torch.float32)
-
-    # 计算异常点到边界的Wasserstein距离
-    print("计算异常点到边界的Wasserstein距离...")
-    anomalous_wasserstein = wasserstein_loss(anomalous_tensor, boundary_tensor)
-
-    print(f"异常点到边界的Wasserstein距离: {anomalous_wasserstein:.4f}")
-
-    return float(anomalous_wasserstein)
-
-def generate_interactive_html(normalized_embedding, labels, boundary_indices, metrics):
+def generate_interactive_html(
+    normalized_embedding: np.ndarray,
+    *,
+    high_boundary_indices: np.ndarray,
+    low_boundary_indices: np.ndarray,
+    metrics,
+):
     print("生成交互式HTML文件...")
 
     mapping_path = os.path.join(RESULTS_DIR, f'embedding_to_image_mapping_{prefix}.json')
@@ -167,20 +237,34 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 
     N = len(mapping_data)
     normalized_embedding = normalized_embedding[:N]
-    labels = labels[:N]
+    # labels 已不再用于分类展示（现在只区分：正常/高维边界/低维边界）
+
+    high_set = set(int(x) for x in np.asarray(high_boundary_indices, dtype=np.int64).tolist())
+    low_set = set(int(x) for x in np.asarray(low_boundary_indices, dtype=np.int64).tolist())
 
     points_data = []
     for i in range(N):
+        is_high = int(i) in high_set
+        is_low = int(i) in low_set
+        # 只输出三类：正常 / 高维边界 / 低维边界
+        # 若同时属于高/低边界，优先归为“低维边界”（更贴近当前可视化空间的边界）。
+        if is_low:
+            ptype = '低维边界'
+        elif is_high:
+            ptype = '高维边界'
+        else:
+            ptype = '正常'
         point_info = {
             'index': i,  # 直接用行号作为唯一 index
             'x': float(normalized_embedding[i, 0]),
             'y': float(normalized_embedding[i, 1]),
-            'cluster': 'normal' if labels[i] == 0 else 'anomalous',
-            'is_boundary': int(i) in boundary_indices
+            'type': ptype,
+            'is_high_boundary': bool(is_high),
+            'is_low_boundary': bool(is_low),
         }
         points_data.append(point_info)
 
-    # 图片接口：使用参数 --img-base 指定，默认当前服务器 IP，兼容 file:// 方式
+    # 图片接口：使用参数 --img-base 指定，默认 localhost，兼容 file:// 方式
     IMAGE_API_BASE = f"{image_api_base}/api/hand_thumb/{prefix}"
 
     # 检查本地 plotly js 是否存在
@@ -515,49 +599,49 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 <body>
     <div class="container">
         <div class="header">
-            <h1>{prefix} 边界分析可视化 · 交互式</h1>
+            <h1>{prefix} · {detector} 边界分析可视化 · 交互式</h1>
             <div class="sub">点击或圈选点查看对应的手部原始图像</div>
             <div class="pills">
-                <span class="pill" title="邻居数 K">K = {K_NEIGHBORS}</span>
-                <span class="pill" title="阈值">Threshold = 0.7</span>
+                <span class="pill" title="原空间边界文件">features_{detector}_boundary.npy</span>
+                <span class="pill" title="隐空间边界文件">{prefix}_{detector}_boundary.npy</span>
             </div>
         </div>
         <div class="metrics">
             <div class="metrics-grid">
                 <div class="metric-card">
-                    <div class="metric-icon">B</div>
+                    <div class="metric-icon">T</div>
                     <div class="metric-content">
-                        <strong>边界点数量</strong>
-                        <span>{metrics['boundary_count']}</span>
+                        <strong>总样本数</strong>
+                        <span>{metrics['total_count']}</span>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">O</div>
+                    <div class="metric-content">
+                        <strong>原空间边界点数</strong>
+                        <span>{metrics['orig_boundary_count']}</span>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">L</div>
+                    <div class="metric-content">
+                        <strong>隐空间边界点数</strong>
+                        <span>{metrics['latent_boundary_count']}</span>
                     </div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-icon">W</div>
                     <div class="metric-content">
                         <strong>Wasserstein 距离</strong>
-                        <span>{metrics['anomalous_wasserstein']:.6f}</span>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-icon">N</div>
-                    <div class="metric-content">
-                        <strong>正常样本</strong>
-                        <span>{np.sum(labels == 0)}</span>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-icon">A</div>
-                    <div class="metric-content">
-                        <strong>异常样本</strong>
-                        <span>{np.sum(labels == 1)}</span>
+                        <span>{metrics['wasserstein']:.6f}</span>
                     </div>
                 </div>
             </div>
         </div>
         <div class="legend">
-            <div class="legend-item"><div class="legend-color normal-color"></div>正常手部图像</div>
-            <div class="legend-item"><div class="legend-color anomalous-color"></div>异常手部图像</div>
-            <div class="legend-item"><div class="legend-color boundary-color"></div>边界点</div>
+            <div class="legend-item"><div class="legend-color normal-color"></div>正常</div>
+            <div class="legend-item"><div class="legend-color anomalous-color"></div>高维边界（红叉）</div>
+            <div class="legend-item"><div class="legend-color boundary-color"></div>低维边界（绿点）</div>
         </div>
         <div class="content">
             <div class="plot-container">
@@ -605,7 +689,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 {json.dumps(points_data, ensure_ascii=False)}
     </script>
     <script type="application/json" id="boundary-indices">
-{json.dumps(boundary_indices.tolist())}
+{json.dumps(np.asarray(low_boundary_indices, dtype=np.int64).tolist())}
     </script>
     <script>
     const IMAGE_API_BASE = "{IMAGE_API_BASE}";
@@ -699,26 +783,26 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
         // trace 内点位索引映射：global index -> point position in that trace
         let traceIndexToPos = {{
             normal: new Map(),
-            anomalous: new Map(),
-            boundary: new Map()
+            high: new Map(),
+            low: new Map()
         }};
 
         function initPlot() {{
-            const normalPoints = pointsData.filter(p => p.cluster === 'normal' && !p.is_boundary);
-            const anomalousPoints = pointsData.filter(p => p.cluster === 'anomalous' && !p.is_boundary);
-            const boundaryPoints = pointsData.filter(p => p.is_boundary);
+            const normalPoints = pointsData.filter(p => p.type === '正常');
+            const highBoundaryPoints = pointsData.filter(p => p.type === '高维边界');
+            const lowBoundaryPoints = pointsData.filter(p => p.type === '低维边界');
 
             // 为后续高亮/筛选建立索引映射
             traceIndexToPos.normal = new Map(normalPoints.map((p, i) => [Number(p.index), i]));
-            traceIndexToPos.anomalous = new Map(anomalousPoints.map((p, i) => [Number(p.index), i]));
-            traceIndexToPos.boundary = new Map(boundaryPoints.map((p, i) => [Number(p.index), i]));
+            traceIndexToPos.high = new Map(highBoundaryPoints.map((p, i) => [Number(p.index), i]));
+            traceIndexToPos.low = new Map(lowBoundaryPoints.map((p, i) => [Number(p.index), i]));
 
             const traceNormal = {{
                 x: normalPoints.map(p => p.x),
                 y: normalPoints.map(p => p.y),
                 mode: 'markers',
                 type: 'scatter',
-                name: '正常手部图像',
+                name: '正常',
                 marker: {{ color: 'lightblue', size: 6, opacity: 0.7 }},
                 selected: {{ marker: {{ opacity: 1.0 }} }},
                 unselected: {{ marker: {{ opacity: 0.12 }} }},
@@ -726,35 +810,35 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 hoverinfo: 'text',
                 customdata: normalPoints.map(p => p.index)
             }};
-            const traceAnomalous = {{
-                x: anomalousPoints.map(p => p.x),
-                y: anomalousPoints.map(p => p.y),
+            const traceHighBoundary = {{
+                x: highBoundaryPoints.map(p => p.x),
+                y: highBoundaryPoints.map(p => p.y),
                 mode: 'markers',
                 type: 'scatter',
-                name: '异常手部图像',
-                marker: {{ color: 'red', size: 8, opacity: 0.8, symbol: 'x' }},
+                name: '高维边界',
+                marker: {{ color: 'red', size: 9, opacity: 0.9, symbol: 'x' }},
                 selected: {{ marker: {{ opacity: 1.0 }} }},
                 unselected: {{ marker: {{ opacity: 0.12 }} }},
-                text: anomalousPoints.map(p => `索引: ${{p.index}}<br>类型: 异常`),
+                text: highBoundaryPoints.map(p => `索引: ${{p.index}}<br>类型: 高维边界`),
                 hoverinfo: 'text',
-                customdata: anomalousPoints.map(p => p.index)
+                customdata: highBoundaryPoints.map(p => p.index)
             }};
-            const traceBoundary = {{
-                x: boundaryPoints.map(p => p.x),
-                y: boundaryPoints.map(p => p.y),
+            const traceLowBoundary = {{
+                x: lowBoundaryPoints.map(p => p.x),
+                y: lowBoundaryPoints.map(p => p.y),
                 mode: 'markers',
                 type: 'scatter',
-                name: '边界点',
-                marker: {{ color: 'green', size: 10, opacity: 0.9, symbol: 'diamond' }},
+                name: '低维边界',
+                marker: {{ color: 'green', size: 9, opacity: 0.9, symbol: 'circle' }},
                 selected: {{ marker: {{ opacity: 1.0 }} }},
                 unselected: {{ marker: {{ opacity: 0.12 }} }},
-                text: boundaryPoints.map(p => `索引: ${{p.index}}<br>类型: 边界点`),
+                text: lowBoundaryPoints.map(p => `索引: ${{p.index}}<br>类型: 低维边界`),
                 hoverinfo: 'text',
-                customdata: boundaryPoints.map(p => p.index)
+                customdata: lowBoundaryPoints.map(p => p.index)
             }};
 
             const layout = {{
-                title: '边界分析可视化 (K={K_NEIGHBORS}, Threshold=0.7)',
+                title: '边界分析可视化',
                 xaxis: {{ title: '成分 1 (归一化)' }},
                 yaxis: {{ title: '成分 2 (归一化)' }},
                 hovermode: 'closest',
@@ -802,7 +886,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 modeBarButtonsToAdd: ['toggleHover', 'resetViews', dirLineButton, clearDirLineButton],
                 scrollZoom: true
             }};
-            plot = Plotly.newPlot('plotly-chart', [traceNormal, traceAnomalous, traceBoundary], layout, config);
+            plot = Plotly.newPlot('plotly-chart', [traceNormal, traceHighBoundary, traceLowBoundary], layout, config);
 
             document.getElementById('plotly-chart').on('plotly_click', function(data) {{
                 // 在框选/套索模式下禁用单点预览
@@ -992,16 +1076,16 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
         function applySelectedHighlightByIndices(gd, orderedIndices) {{
             const indexSet = new Set(orderedIndices.map(x => Number(x)));
             const selNormal = [];
-            const selAnom = [];
-            const selBoundary = [];
+            const selHigh = [];
+            const selLow = [];
 
             for (const idx of indexSet) {{
                 if (traceIndexToPos.normal.has(idx)) selNormal.push(traceIndexToPos.normal.get(idx));
-                if (traceIndexToPos.anomalous.has(idx)) selAnom.push(traceIndexToPos.anomalous.get(idx));
-                if (traceIndexToPos.boundary.has(idx)) selBoundary.push(traceIndexToPos.boundary.get(idx));
+                if (traceIndexToPos.high.has(idx)) selHigh.push(traceIndexToPos.high.get(idx));
+                if (traceIndexToPos.low.has(idx)) selLow.push(traceIndexToPos.low.get(idx));
             }}
-            // 依次对应 traceNormal/traceAnomalous/traceBoundary
-            Plotly.restyle(gd, {{'selectedpoints': [selNormal, selAnom, selBoundary]}});
+            // 依次对应 traceNormal/traceHighBoundary/traceLowBoundary
+            Plotly.restyle(gd, {{'selectedpoints': [selNormal, selHigh, selLow]}});
             Plotly.redraw(gd);
         }}
 
@@ -1033,8 +1117,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                 imgDiv.innerHTML = `
                     <div><strong>#${{rank + 1}} · 索引 ${{point.index}}</strong></div>
                     <img src="${{imgUrl}}" alt="手部图像 ${{point.index}}" style="max-width: 100px; max-height: 100px; cursor:pointer;" onerror="this.style.display='none'">
-                    <div>类型: ${{point.cluster === 'normal' ? '正常' : '异常'}}</div>
-                    <div>边界点: ${{point.is_boundary ? '是' : '否'}}</div>
+                    <div>类型: ${{point.type}}</div>
                     <div style="color:#5a6d8a;font-size:0.82rem;">t=${{h.t.toFixed(4)}} · dist=${{h.dist.toFixed(4)}}</div>
                 `;
                 const imgEl = imgDiv.querySelector('img');
@@ -1066,16 +1149,12 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 
             currentPointIndex = pointIndex;
 
-            const typeBadgeClass = point.cluster === 'normal' ? 'badge-normal' : 'badge-anomalous';
-            const boundaryBadgeClass = point.is_boundary ? 'badge-yes' : 'badge-no';
-            const typeText = point.cluster === 'normal' ? '正常' : '异常';
-            const boundaryText = point.is_boundary ? '边界点: 是' : '边界点: 否';
+            const typeBadgeClass = point.type === '正常' ? 'badge-normal' : (point.type === '高维边界' ? 'badge-anomalous' : 'badge-yes');
 
             document.getElementById('point-info-content').innerHTML = `
                 <div class="info-header">
                     <span class="chip" title="唯一索引"><span class="dot"></span> ID #${{point.index}}</span>
-                    <span class="badge ${{typeBadgeClass}}" title="样本类型">类型: ${{typeText}}</span>
-                    <span class="badge ${{boundaryBadgeClass}}" title="是否属于边界">${{boundaryText}}</span>
+                    <span class="badge ${{typeBadgeClass}}" title="样本类型">类型: ${{point.type}}</span>
                 </div>
                 <div class="info-grid">
                     <div class="info-item"><span>坐标 X</span><strong>${{point.x.toFixed(5)}}</strong></div>
@@ -1122,8 +1201,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
                     imgDiv.innerHTML = `
                         <div><strong>索引 ${{point.index}}</strong></div>
                         <img src="${{imgUrl}}" alt="手部图像 ${{point.index}}" style="max-width: 100px; max-height: 100px; cursor:pointer;" onerror="this.style.display='none'">
-                        <div>类型: ${{point.cluster === 'normal' ? '正常' : '异常'}}</div>
-                        <div>边界点: ${{point.is_boundary ? '是' : '否'}}</div>
+                        <div>类型: ${{point.type}}</div>
                     `;
                     // 点击缩略图放大到右侧大图预览
                     imgDiv.querySelector('img').onclick = function() {{
@@ -1136,7 +1214,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 
         function zoomToBoundary() {{
             if (boundaryIndices.length === 0) return;
-            const boundaryPoints = pointsData.filter(p => p.is_boundary);
+            const boundaryPoints = pointsData.filter(p => p.type === '低维边界');
             const xValues = boundaryPoints.map(p => p.x);
             const yValues = boundaryPoints.map(p => p.y);
             const xRange = [Math.min(...xValues) - 0.1, Math.max(...xValues) + 0.1];
@@ -1193,7 +1271,7 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 </html>
     """
 
-    html_path = os.path.join(RESULTS_DIR, f'{prefix}.html')
+    html_path = os.path.join(RESULTS_DIR, f'{prefix}_{detector}.html')
     with open(html_path, 'w', encoding='utf-8') as f:
         f.write(html_content)
 
@@ -1202,6 +1280,9 @@ def generate_interactive_html(normalized_embedding, labels, boundary_indices, me
 
 def visualize_results(normalized_embedding, labels, boundary_indices):
     print("生成可视化图表...")
+
+    if plt is None:
+        raise RuntimeError("未安装 matplotlib，无法生成静态图。你可以忽略该功能，HTML 已可正常生成。")
 
     plt.figure(figsize=(12, 10))
 
@@ -1236,36 +1317,67 @@ def visualize_results(normalized_embedding, labels, boundary_indices):
 
 def main():
     print("=" * 50)
-    print("固定参数边界分析")
+    print(f"边界分析（读取已保存边界结果）：prefix={prefix}, detector={detector}")
     print("=" * 50)
 
     total_start_time = time.time()
 
-    normalized_embedding, labels = load_and_normalize_data()
+    low_raw, low_norm, labels = load_and_normalize_data()
 
-    # 读取对应 mapping，先对齐长度再计算，保证指标/边界点/绘图一致
+    # 读取 mapping，严格对齐长度（避免映射/绘图/指标错位）
     mapping_path = os.path.join(RESULTS_DIR, f'embedding_to_image_mapping_{prefix}.json')
     with open(mapping_path, 'r', encoding='utf-8') as f:
         mapping_data = json.load(f)
     N = len(mapping_data)
-    normalized_embedding = normalized_embedding[:N]
+    low_raw = low_raw[:N]
+    low_norm = low_norm[:N]
     labels = labels[:N]
 
-    boundary_indices = detect_boundary_fixed_params(normalized_embedding)
-    anomalous_wasserstein = calculate_wasserstein_metrics(normalized_embedding, labels, boundary_indices)
-    # 只生成交互式 HTML，不生成静态图和 txt
+    # 读取边界点子集文件
+    high_boundary_points, low_boundary_points = load_boundary_files()
+
+    # 1) 隐空间边界：用低维边界点子集反推索引，用于散点图高亮
+    try:
+        low_boundary_indices = indices_from_subset(low_raw, low_boundary_points)
+    except Exception:
+        low_boundary_indices = np.array([], dtype=np.int64)
+
+    # 2) 原空间边界：用高维边界点子集反推索引 -> 再映射到低维坐标上用于 WD
+    try:
+        high_features_path = _find_features_file()
+        high_full = np.load(high_features_path, mmap_mode='r')
+        high_boundary_indices = indices_from_subset(np.asarray(high_full), high_boundary_points)
+    except Exception:
+        high_boundary_indices = np.array([], dtype=np.int64)
+
+    wdist = calculate_wasserstein_metrics(
+        normalized_low=low_norm,
+        high_boundary_indices=high_boundary_indices,
+        low_boundary_indices=low_boundary_indices,
+    )
+
     metrics = {
-        'boundary_count': len(boundary_indices),
-        'anomalous_wasserstein': anomalous_wasserstein,
+        'total_count': int(N),
+        'orig_boundary_count': int(high_boundary_points.shape[0]),
+        'latent_boundary_count': int(low_boundary_points.shape[0]),
+        'wasserstein': float(wdist),
     }
-    html_path = generate_interactive_html(normalized_embedding, labels, boundary_indices, metrics)
+
+    html_path = generate_interactive_html(
+        low_norm,
+        high_boundary_indices=high_boundary_indices,
+        low_boundary_indices=low_boundary_indices,
+        metrics=metrics,
+    )
 
     total_time = time.time() - total_start_time
     print("=" * 50)
     print("分析完成!")
     print(f"总耗时: {total_time:.2f}秒 ({total_time / 60:.1f}分钟)")
-    print(f"边界点数量: {metrics['boundary_count']}")
-    print(f"异常点到边界Wasserstein距离: {metrics['anomalous_wasserstein']:.6f}")
+    print(f"总样本数: {metrics['total_count']}")
+    print(f"原空间边界点数: {metrics['orig_boundary_count']}")
+    print(f"隐空间边界点数: {metrics['latent_boundary_count']}")
+    print(f"Wasserstein距离: {metrics['wasserstein']:.6f}")
     print(f"交互式HTML保存至: {html_path}")
     print("=" * 50)
 

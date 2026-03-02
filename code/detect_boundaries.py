@@ -98,8 +98,9 @@ def save_points(out_dir: Path, *, tag: str, detector_name: str, x: np.ndarray, r
     normal = x[result.normal_indices]
     boundary_path = out_dir / f"{tag}_{detector_name}_boundary.npy"
     normal_path = out_dir / f"{tag}_{detector_name}_normal.npy"
-    np.save(boundary_path, boundary.astype(np.float32, copy=False))
-    np.save(normal_path, normal.astype(np.float32, copy=False))
+    # 重要：保持与原输入一致的 dtype，便于后续精确回查索引（用于指标计算/对齐验证）。
+    np.save(boundary_path, boundary)
+    np.save(normal_path, normal)
     return boundary_path, normal_path
 
 
@@ -108,6 +109,9 @@ def main():
 
     parser.add_argument("--high", type=str, required=True, help="高维特征 .npy（建议 data/<dataset>-features/features.npy，形如 [N, D]）")
     parser.add_argument("--low", type=str, default=None, help="低维特征 .npy（<方法>_features.npy；兼容旧 *_embedding.npy，形如 [N, 2] 或 [N, d]）")
+
+    parser.add_argument("--skip-high", action="store_true", help="跳过高维边界检测与输出（仅在同时传了 --low 时有意义）")
+    parser.add_argument("--skip-low", action="store_true", help="跳过低维边界检测与输出")
 
     parser.add_argument("--detector", type=str, default="bdlle", help=f"边界检测方法（可用：{list_detectors()}）")
 
@@ -165,28 +169,34 @@ def main():
     x_high_raw = load_array(high_path)
     x_high = normalize_array(x_high_raw, args.normalize_high)
 
-    k_high = int(args.k_high) if args.k_high is not None else int(args.k)
-    high_res = detector(
-        x_high,
-        d=int(args.d),
-        k=k_high,
-        threshold_mode=args.threshold_mode,
-        threshold_ratio=float(args.threshold_ratio),
-    )
+    high_res: Optional[BoundaryResult] = None
+    if not args.skip_high:
+        k_high = int(args.k_high) if args.k_high is not None else int(args.k)
+        high_res = detector(
+            x_high,
+            d=int(args.d),
+            k=k_high,
+            threshold_mode=args.threshold_mode,
+            threshold_ratio=float(args.threshold_ratio),
+        )
 
-    # 高维输出 tag 固定为 features
-    high_boundary_path, high_normal_path = save_points(
-        out_dir,
-        tag="features",
-        detector_name=detector_name,
-        x=x_high_raw,
-        result=high_res,
-    )
-    print(f"[高维] N={x_high_raw.shape[0]} D={x_high_raw.shape[1]} | 边界={len(high_res.boundary_indices)} | 正常={len(high_res.normal_indices)}")
-    print(f"  已保存: {high_boundary_path}")
-    print(f"  已保存: {high_normal_path}")
+        # 高维输出 tag 固定为 features
+        high_boundary_path, high_normal_path = save_points(
+            out_dir,
+            tag="features",
+            detector_name=detector_name,
+            x=x_high_raw,
+            result=high_res,
+        )
+        print(
+            f"[高维] N={x_high_raw.shape[0]} D={x_high_raw.shape[1]} | 边界={len(high_res.boundary_indices)} | 正常={len(high_res.normal_indices)}"
+        )
+        print(f"  已保存: {high_boundary_path}")
+        print(f"  已保存: {high_normal_path}")
+    else:
+        print(f"[高维] 已跳过（--skip-high）")
 
-    if low_path:
+    if low_path and (not args.skip_low):
         x_low_raw = load_array(low_path)
         if x_low_raw.shape[0] != x_high_raw.shape[0]:
             raise SystemExit(
@@ -215,6 +225,8 @@ def main():
         print(f"[低维] N={x_low_raw.shape[0]} D={x_low_raw.shape[1]} | 边界={len(low_res.boundary_indices)} | 正常={len(low_res.normal_indices)}")
         print(f"  已保存: {low_boundary_path}")
         print(f"  已保存: {low_normal_path}")
+    elif low_path and args.skip_low:
+        print(f"[低维] 已跳过（--skip-low）")
 
 
 if __name__ == "__main__":
