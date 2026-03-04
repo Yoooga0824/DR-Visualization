@@ -7,15 +7,15 @@ from .types import BoundaryResult
 
 # 全局默认 K：不显式传参时将使用该值。
 # 你只需要改这里，就能影响 knn_distance 的默认行为。
-KNN_DISTANCE_K = 50
+KNN_DISTANCE_K = 15
 
 
 def detect_knn_distance(
     x: np.ndarray,
     *,
     k: int | None = None,
-    threshold_mode: str = "ratio",
-    threshold_ratio: float = 0.7,
+    threshold_mode: str = "internal",
+    threshold_ratio: float = 0.85,
     **kwargs,
 ) -> BoundaryResult:
     """KNN 距离边界检测（通用、快速、依赖少）。

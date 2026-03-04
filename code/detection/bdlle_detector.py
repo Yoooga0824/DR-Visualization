@@ -5,11 +5,15 @@ import numpy as np
 from .types import BoundaryResult
 
 
+# BDLLE 默认近邻数：当未显式传 k（或传 None）时使用。
+BDLLE_K = 100
+
+
 def detect_bdlle(
     x: np.ndarray,
     *,
-    d: int,
-    k: int,
+    d: int | None = 2,
+    k: int | None = None,
     threshold_mode: str = "ratio",
     threshold_ratio: float = 0.7,
     **kwargs,
@@ -23,7 +27,10 @@ def detect_bdlle(
     """
     from .BDLLE import bd_lle
 
-    boundary_bool, scores = bd_lle(x, d=int(d), K=int(k))
+    d_val = 2 if d is None else int(d)
+    k_val = BDLLE_K if k is None else int(k)
+
+    boundary_bool, scores = bd_lle(x, d=d_val, K=k_val)
 
     threshold_mode = (threshold_mode or "internal").lower()
     if threshold_mode == "internal":

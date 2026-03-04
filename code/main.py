@@ -38,6 +38,10 @@ def choose_from_list(title: str, options: Sequence[str], *, allow_multi: bool, d
     for i, opt in enumerate(options):
         print(f"  [{i + 1}] {opt}")
 
+    defaults = [options[i] for i in default_idxs if 0 <= i < len(options)]
+    if defaults:
+        print("默认：" + ("、".join(defaults)))
+
     while True:
         prompt = "请输入编号"
         if allow_multi:
@@ -285,11 +289,17 @@ def step_extract_features(ds: DatasetPaths) -> None:
         else:
             dirs = ds.raw_dirs
 
-    model = choose_from_list("选择 backbone：", ["resnet18", "resnet50"], allow_multi=False, default_idxs=[0])[0]
-    device = choose_from_list("选择 device：", ["auto", "cpu", "cuda"], allow_multi=False, default_idxs=[0])[0]
-    batch = input("batch-size（默认 64）：").strip()
-    batch_size = batch if batch else "64"
-    recursive = ask_yes_no("是否递归扫描子目录（--recursive）？", default_yes=False)
+    if ask_yes_no("是否使用【特征提取】默认参数（resnet18 / auto / batch=64 / 不递归）？", default_yes=True):
+        model = "resnet18"
+        device = "auto"
+        batch_size = "64"
+        recursive = False
+    else:
+        model = choose_from_list("选择 backbone：", ["resnet18", "resnet50"], allow_multi=False, default_idxs=[0])[0]
+        device = choose_from_list("选择 device：", ["auto", "cpu", "cuda"], allow_multi=False, default_idxs=[0])[0]
+        batch = input("batch-size（默认 64）：").strip()
+        batch_size = batch if batch else "64"
+        recursive = ask_yes_no("是否递归扫描子目录（--recursive）？", default_yes=False)
 
     args = [
         "--dirs",
@@ -339,19 +349,10 @@ def step_dimred(ds: DatasetPaths, *, methods: List[str]) -> List[str]:
 def step_boundary(ds: DatasetPaths, *, detectors: List[str], methods: List[str]) -> None:
     high_path = ensure_features_file(ds.features_dir, ds.dataset)
 
-    d_val = input("BDLLE 的 d（默认 2；其它 detector 会忽略也没关系）：").strip()
-    d_val = d_val if d_val else "2"
-    k_val = input("通用 k（默认 100）：").strip()
-    k_val = k_val if k_val else "100"
-
-    threshold_mode = choose_from_list("threshold-mode：", ["ratio", "internal"], allow_multi=False, default_idxs=[0])[0]
-    threshold_ratio = "0.7"
-    if threshold_mode == "ratio":
-        tr = input("threshold-ratio（默认 0.7）：").strip()
-        threshold_ratio = tr if tr else "0.7"
-
-    norm_high = choose_from_list("normalize-high：", ["zscore", "minmax", "none"], allow_multi=False, default_idxs=[0])[0]
-    norm_low = choose_from_list("normalize-low：", ["minmax", "zscore", "none"], allow_multi=False, default_idxs=[0])[0]
+    # 主流程默认：减少交互；参数尽量走 detector 自身默认（尤其 knn_distance 的 KNN_DISTANCE_K/threshold_ratio）。
+    # 如需覆盖 k/d/threshold 等，请直接运行 detect_boundaries.py 并显式传参。
+    norm_high = "zscore"
+    norm_low = "minmax"
 
     for det in detectors:
         print(f"\n=== 边界检测器：{det} ===")
@@ -362,14 +363,6 @@ def step_boundary(ds: DatasetPaths, *, detectors: List[str], methods: List[str])
             str(high_path),
             "--detector",
             det,
-            "--d",
-            d_val,
-            "--k",
-            k_val,
-            "--threshold-mode",
-            threshold_mode,
-            "--threshold-ratio",
-            threshold_ratio,
             "--normalize-high",
             norm_high,
             "--normalize-low",
@@ -390,14 +383,6 @@ def step_boundary(ds: DatasetPaths, *, detectors: List[str], methods: List[str])
                 str(low_path),
                 "--detector",
                 det,
-                "--d",
-                d_val,
-                "--k",
-                k_val,
-                "--threshold-mode",
-                threshold_mode,
-                "--threshold-ratio",
-                threshold_ratio,
                 "--normalize-high",
                 norm_high,
                 "--normalize-low",

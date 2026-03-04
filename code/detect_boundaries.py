@@ -115,18 +115,18 @@ def main():
 
     parser.add_argument("--detector", type=str, default="bdlle", help=f"边界检测方法（可用：{list_detectors()}）")
 
-    parser.add_argument("--d", type=int, default=2, help="流形维度 d（BDLLE 所需）")
-    parser.add_argument("--k", type=int, default=100, help="通用 K（若未分别指定 k-high/k-low，则都使用该值）")
+    parser.add_argument("--d", type=int, default=None, help="流形维度 d（BDLLE 所需；不传则使用 detector 默认）")
+    parser.add_argument("--k", type=int, default=None, help="通用 K（不传则使用 detector 默认；k-high/k-low 可覆盖）")
     parser.add_argument("--k-high", type=int, default=None, help="高维检测的 K（覆盖 --k）")
     parser.add_argument("--k-low", type=int, default=None, help="低维检测的 K（覆盖 --k）")
 
     parser.add_argument(
         "--threshold-mode",
         type=str,
-        default="ratio",
-        help="internal: 使用 detector 内部默认阈值；ratio: 使用 ratio*max(score)（默认 ratio）",
+        default=None,
+        help="internal: 使用 detector 内部默认阈值；ratio: 使用 ratio*max(score)；不传则使用 detector 默认",
     )
-    parser.add_argument("--threshold-ratio", type=float, default=0.7, help="当 threshold-mode=ratio 时生效")
+    parser.add_argument("--threshold-ratio", type=float, default=None, help="当 threshold-mode=ratio 时生效；不传则使用 detector 默认")
 
     parser.add_argument(
         "--normalize-high",
@@ -171,14 +171,19 @@ def main():
 
     high_res: Optional[BoundaryResult] = None
     if not args.skip_high:
-        k_high = int(args.k_high) if args.k_high is not None else int(args.k)
-        high_res = detector(
-            x_high,
-            d=int(args.d),
-            k=k_high,
-            threshold_mode=args.threshold_mode,
-            threshold_ratio=float(args.threshold_ratio),
+        k_high = int(args.k_high) if args.k_high is not None else (int(args.k) if args.k is not None else None)
+        d_eff = (int(args.d) if args.d is not None else None)
+        thr_mode = args.threshold_mode if args.threshold_mode is not None else "default"
+        thr_ratio = args.threshold_ratio if args.threshold_ratio is not None else "default"
+        print(
+            f"[参数][高维] detector={detector_name} | k={k_high if k_high is not None else 'default'} | d={d_eff if d_eff is not None else 'default'} | threshold={thr_mode}@{thr_ratio} | norm={args.normalize_high}"
         )
+        det_kwargs = {"d": d_eff, "k": k_high}
+        if args.threshold_mode is not None:
+            det_kwargs["threshold_mode"] = args.threshold_mode
+        if args.threshold_ratio is not None:
+            det_kwargs["threshold_ratio"] = float(args.threshold_ratio)
+        high_res = detector(x_high, **det_kwargs)
 
         # 高维输出 tag 固定为 features
         high_boundary_path, high_normal_path = save_points(
@@ -205,14 +210,19 @@ def main():
             )
         x_low = normalize_array(x_low_raw, args.normalize_low)
 
-        k_low = int(args.k_low) if args.k_low is not None else int(args.k)
-        low_res = detector(
-            x_low,
-            d=int(args.d),
-            k=k_low,
-            threshold_mode=args.threshold_mode,
-            threshold_ratio=float(args.threshold_ratio),
+        k_low = int(args.k_low) if args.k_low is not None else (int(args.k) if args.k is not None else None)
+        d_eff = (int(args.d) if args.d is not None else None)
+        thr_mode = args.threshold_mode if args.threshold_mode is not None else "default"
+        thr_ratio = args.threshold_ratio if args.threshold_ratio is not None else "default"
+        print(
+            f"[参数][低维] detector={detector_name} | k={k_low if k_low is not None else 'default'} | d={d_eff if d_eff is not None else 'default'} | threshold={thr_mode}@{thr_ratio} | norm={args.normalize_low}"
         )
+        det_kwargs = {"d": d_eff, "k": k_low}
+        if args.threshold_mode is not None:
+            det_kwargs["threshold_mode"] = args.threshold_mode
+        if args.threshold_ratio is not None:
+            det_kwargs["threshold_ratio"] = float(args.threshold_ratio)
+        low_res = detector(x_low, **det_kwargs)
 
         low_method = infer_method_from_path(low_path)
         low_boundary_path, low_normal_path = save_points(
