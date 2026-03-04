@@ -1,6 +1,6 @@
 # DR-Visualization 使用说明（中文）
 
-一个用于图像降维可视化与边界分析的小型工作流（当前含 Hands、yalefaces、mnist 三套数据），包括：
+一个用于图像降维可视化与边界分析的小型工作流（仓库内常见示例为 Hands、yalefaces、zero；也可自行加入 mnist 等数据集），包括：
 - 生成 embedding 与原始图像的一一映射（mapping）
 - 启动图片服务，供前端 HTML 以 index 取缩略图
 - 生成可交互的 HTML（支持本地 file:// 直接打开）
@@ -12,7 +12,7 @@
 - （兼容旧命名）<prefix>_embedding.npy
 若你仍保留“双集合/异常侧”文件，也兼容：
 - anomalous_<prefix>_features.npy / anomalous_<prefix>_embedding.npy
-然后运行 make_embedding_mapping.py 和 boundary_analysis.py 生成映射与 HTML；也可用 main.py 批量处理。
+然后运行 make_embedding_mapping.py 生成映射、运行 detect_boundaries.py 生成边界结果，再由 boundary_analysis.py 读取边界结果生成 HTML；也可用 main.py 交互式跑通整条流程。
 
 ---
 
@@ -21,9 +21,12 @@
 ```
 DR-Visualization/
 ├─ code/
-│  ├─ main.py                     # 批量入口（交互选择方法或指定 --prefix）
+│  ├─ main.py                     # 交互式入口：可选执行特征提取→降维→边界检测→mapping→HTML
 │  ├─ make_embedding_mapping.py   # 生成映射 JSON（embedding ↔ 图片）
-│  ├─ boundary_analysis.py        # 生成交互式 HTML（含边界检测与指标）
+│  ├─ detect_boundaries.py        # 通用边界检测：输出 features_<det>_boundary.npy / <method>_<det>_boundary.npy
+│  ├─ boundary_analysis.py        # 读取已保存边界结果，生成交互式 HTML 与指标（Wasserstein 等）
+│  ├─ compute_embeddings.py        # 从 features.npy 计算 <METHOD>_features.npy（PCA/TSNE/UMAP）
+│  ├─ extract_image_features.py    # 从原始图像提取高维 features.npy + files.txt
 │  ├─ image_server.py             # Flask 图片缩略图服务（/api/hand_thumb/<prefix>/<index>?dataset=<dataset>，自动 RGB 转换）
 │  ├─ tool_functions.py           # 工具函数（含 wasserstein_loss）
 │  └─ detection/BDLLE.py          # 边界检测算法（BD-LLE）
@@ -34,9 +37,11 @@ DR-Visualization/
 │  │  ├─ Anomalous_Hands/         # Hands 异常样本图片目录（*.jpg）
 │  │  ├─ yalefaces/               # yalefaces 正常样本图片目录（*.png）
 │  │  ├─ Anomalous_yalefaces/     # yalefaces 异常样本图片目录（*.png）
-│  │  ├─ mnist/                   # mnist 正常样本图片目录（*.png，反向生成 <index>.png）
-│  │  └─ Anomalous_mnist/         # mnist 异常样本图片目录（*.png，反向生成 <index>.png）
-│  ├─ Hands-features/ 或 yalefaces-features/ 或 mnist-features/
+│  │  ├─ zero/                    # zero 示例数据集（若存在）
+│  │  ├─ Anomalous_zero/          # zero 异常样本（若存在）
+│  │  ├─ mnist/                   # （可选）mnist 正常样本图片目录（*.png，反向生成 <index>.png）
+│  │  └─ Anomalous_mnist/         # （可选）mnist 异常样本图片目录（*.png，反向生成 <index>.png）
+│  ├─ Hands-features/ 或 yalefaces-features/ 或 zero-features/ 或 mnist-features/
 │  │  ├─ features.npy                         # 整体照片提取的高维特征
 │  │  ├─ <prefix>_features.npy                # 降维后的低维特征（推荐命名）
 │  │  ├─ <prefix>_embedding.npy               # 兼容旧命名
@@ -50,7 +55,7 @@ DR-Visualization/
 └─ results/
   ├─ <dataset>-results/
   │  ├─ embedding_to_image_mapping_<prefix>.json # 每种方法的映射文件
-  │  └─ <prefix>.html                           # 每种方法的交互式可视化页面
+  │  └─ <prefix>_<detector>.html                # 交互式可视化页面（由 boundary_analysis.py 生成）
 ```
 
 ---
@@ -58,12 +63,17 @@ DR-Visualization/
 ## 环境依赖
 
 建议 Python 3.9+。需要安装的主要第三方库：
-- numpy, matplotlib, scipy, tqdm
-- torch（用于 wasserstein 距离计算）
+- numpy, tqdm（matplotlib 仅在你自己做额外绘图时需要）
+- scipy（边界检测 bdlle/knn_distance 需要；boundary_analysis 也可用它做 Wasserstein fallback）
+- torch + geomloss（可选：用于更“重”的 Wasserstein 计算；缺失时会自动回退到 scipy）
 - Pillow（PIL，服务端会对非 RGB 图像自动转换为 RGB 再编码为 JPEG）
 - Flask, flask-cors（图片服务）
 
-Plotly 通过 CDN 加载，HTML 本地打开即可。
+可选依赖：
+- scikit-learn（TSNE 降维与 OCSVM 检测器）
+- umap-learn（UMAP 降维）
+
+Plotly 默认通过 CDN 加载；若 `results/<dataset>-results/` 下存在 `plotly-2.24.1.min.js`，则会优先使用本地文件（更适合离线环境）。
 
 ---
 
@@ -84,7 +94,7 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
 
 2) 生成映射（mapping）
 - 单方法：运行 `code/make_embedding_mapping.py`，示例（Windows 推荐使用 `py`）：
-  - `py code/make_embedding_mapping.py --prefix TSNE`
+  - `py code/make_embedding_mapping.py --prefix TSNE --features-dir data/Hands-features --results-dir results/Hands-results`
   - 可选：`--no-filter` 关闭正常与异常的 failed 过滤
   - 可选：`--anom-list D:\path\to\anom_list.txt` 精确指定异常图片集合与顺序（跳过异常 failed 过滤）
   - 可选（推荐，严格对齐）：`--files-list data/<dataset>-features/files.txt` 直接按特征提取时的权威顺序生成 mapping（适用于你把 raw/<dataset> 与 raw/Anomalous_<dataset> 合并成一个“单集合”特征矩阵的情况）
@@ -94,12 +104,18 @@ Plotly 通过 CDN 加载，HTML 本地打开即可。
 - `py code/image_server.py`
 - 服务默认监听 `0.0.0.0:5678`，接口：`/api/hand_thumb/<prefix>/<index>?dataset=<dataset>`（dataset 可选，但建议带上以精确匹配映射文件所在数据集）
 
-4) 生成交互式 HTML
-- `py code/boundary_analysis.py --prefix TSNE --features-dir data/Hands-features`
-- 生成 `results/Hands-results/TSNE.html`，可直接双击用浏览器打开（file:// 方式）
+4) 生成边界结果（boundary files）
+- `py code/detect_boundaries.py --high data/Hands-features/features.npy --low data/Hands-features/TSNE_features.npy --detector bdlle`
+- 将在 `data/Hands-features/` 下生成：
+  - `features_bdlle_boundary.npy` / `features_bdlle_normal.npy`
+  - `TSNE_bdlle_boundary.npy` / `TSNE_bdlle_normal.npy`
 
-5) 打开页面
-- 打开 `results/<dataset>-results/<prefix>.html` 即可交互查看、点击/圈选显示图像。
+5) 生成交互式 HTML（读取已保存边界结果）
+- `py code/boundary_analysis.py --prefix TSNE --detector bdlle --features-dir data/Hands-features`
+- 生成 `results/Hands-results/TSNE_bdlle.html`，可直接双击用浏览器打开（file:// 方式）
+
+6) 打开页面
+- 打开 `results/<dataset>-results/<prefix>_<detector>.html` 即可交互查看、点击/圈选显示图像。
 
 ---
 
@@ -123,7 +139,8 @@ py D:\DR-Visualization\code\translate_npy_to_image.py `
 
 ```powershell
 py D:\DR-Visualization\code\make_embedding_mapping.py --prefix TSNE --features-dir D:\DR-Visualization\data\mnist-features
-py D:\DR-Visualization\code\boundary_analysis.py --prefix TSNE --features-dir D:\DR-Visualization\data\mnist-features --img-base http://localhost:5678
+py D:\DR-Visualization\code\detect_boundaries.py --high D:\DR-Visualization\data\mnist-features\mnist_features.npy --low D:\DR-Visualization\data\mnist-features\TSNE_features.npy --detector bdlle
+py D:\DR-Visualization\code\boundary_analysis.py --prefix TSNE --detector bdlle --features-dir D:\DR-Visualization\data\mnist-features --img-base http://localhost:5678
 ```
 
 - 映射脚本会自动检测 `*.png` 并仅展示 mnist 相关的原始/异常目录候选；唯一候选会自动选择。
@@ -225,10 +242,9 @@ py code/compute_embeddings.py --features data/Hands-features/features.npy --meth
 ## 批量处理（推荐）
 
 - 入口：`code/main.py`
-- 支持交互式按“数据集 → 方法”逐步选择（现支持 Hands、yalefaces、mnist），或通过 `--prefix` 只处理某一方法：
-  - `py code/main.py`（交互式多选/全选）
-  - `py code/main.py --prefix NeuralTSNE`（仅处理指定方法）
-- 对每个选择的方法，依次执行：生成 mapping → 生成 HTML。
+- 当前版本以交互为主：自动扫描 `data/*-features` 与 `data/raw/*` 来推断可用数据集，然后选择：降维方法、检测器，以及要执行哪些阶段。
+  - `py code/main.py`
+- 典型流程（可在交互中按需跳过）：特征提取（可选）→ 降维（可选）→ 边界检测 → mapping → HTML。
 
 ---
 
@@ -273,7 +289,9 @@ py code/compute_embeddings.py --features data/Hands-features/features.npy --meth
 - 请确保：
   1. `image_server.py` 已在该 IP:5678 上运行
   2. 防火墙允许 5678 端口访问（内网环境）
-  3. 如果你的机器 IP 不是代码里写死的值，请修改 `code/boundary_analysis.py` 的 `IMAGE_API_BASE`（或通过命令行 `--img-base`），再重新生成 HTML。该脚本会自动附加 `?dataset=<dataset>` 并在点击时追加时间戳 `t=...` 作为缓存清理参数。
+    3. 默认生成的 HTML 会使用 `--img-base`（缺省为 `http://localhost:5678`）。如需在局域网其它机器打开 HTML，请在生成时显式传入：
+      - `py code/boundary_analysis.py ... --img-base http://<你的机器IP>:5678`
+      HTML 会自动附加 `?dataset=<dataset>&t=<timestamp>`（避免缓存、并精确匹配映射文件）。
 
 ---
 
@@ -316,14 +334,19 @@ py code/compute_embeddings.py --features data/Hands-features/features.npy --meth
 
 - `boundary_analysis.py`
   - `--prefix` 指定方法
-  - `K_NEIGHBORS`（默认 100）：BD-LLE 的邻居数
-  - 阈值固定 0.7×max(B)
-  - 页面内显示边界点数量与 Wasserstein 距离指标
+  - `--detector` 指定检测器名（用于读取 `features_<det>_boundary.npy` 与 `<method>_<det>_boundary.npy`）
+  - `--features-dir` / `--results-dir` 指定输入与输出目录
+  - `--img-base` 指定图片服务基地址（默认 `http://localhost:5678`）
+  - 页面内显示边界点数量与 Wasserstein 距离指标（优先 torch+geomloss，否则回退 scipy）
 
 - `make_embedding_mapping.py`
   - `--prefix` 指定方法
   - `--no-filter` 关闭正常与异常过滤
   - `--anom-list` 指定异常图片清单（绝对路径或文件名，逐行一条）
+
+- `detect_boundaries.py`
+  - `--detector` 选择检测器（bdlle/knn_distance/ocsvm 等）
+  - `--k/--k-high/--k-low`、`--threshold-mode/--threshold-ratio`、`--normalize-high/--normalize-low` 控制检测细节
 
 - 新增一种降维方法的接入
   - 将 `<prefix>_features.npy`（或兼容旧 `<prefix>_embedding.npy`）放入 `data/*-features/`
