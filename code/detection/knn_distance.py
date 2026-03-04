@@ -7,7 +7,7 @@ from .types import BoundaryResult
 
 # 全局默认 K：不显式传参时将使用该值。
 # 你只需要改这里，就能影响 knn_distance 的默认行为。
-KNN_DISTANCE_K = 15
+KNN_DISTANCE_K = 100
 
 
 def detect_knn_distance(
